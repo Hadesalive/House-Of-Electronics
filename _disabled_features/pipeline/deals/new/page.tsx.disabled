@@ -1,0 +1,596 @@
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import { AppLayout } from '@/components/layouts/app-layout';
+import { FormCard } from '@/components/ui/forms/form-card';
+import { Button, Toast } from '@/components/ui/core';
+import { Input, Select, Textarea } from '@/components/ui/forms';
+import { useSettings } from '@/contexts/SettingsContext';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { ArrowLeftIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/outline';
+import { Deal } from '@/lib/database/schema';
+
+export default function NewDealPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  
+  const [loading, setLoading] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [customers, setCustomers] = useState<Array<{ id: string; name: string }>>([]);
+  const [deal, setDeal] = useState<Partial<Deal>>({
+    title: '',
+    customerId: '',
+    customerName: '',
+    value: 0,
+    probability: 20,
+    stage: 'lead',
+    expectedCloseDate: '',
+    source: '',
+    priority: 'medium',
+    tags: [],
+    notes: '',
+    stakeholders: [],
+    negotiationHistory: [],
+    competitorInfo: {
+      competitors: [],
+      ourAdvantages: [],
+      theirAdvantages: [],
+      priceComparison: ''
+    }
+  });
+
+  useEffect(() => {
+    // Load customers
+    const loadCustomers = async () => {
+      try {
+        const response = await fetch('/api/customers');
+        const customersData = await response.json();
+        setCustomers(customersData);
+      } catch {
+        // Failed to load customers
+      }
+    };
+
+    loadCustomers();
+
+    // Set initial stage from URL params
+    const stage = searchParams.get('stage');
+    if (stage) {
+      setDeal(prev => ({ ...prev, stage: stage as any }));
+    }
+  }, [searchParams]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+
+    try {
+      const response = await fetch('/api/deals', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(deal),
+      });
+
+      if (response.ok) {
+        setToast({ message: 'Deal created successfully', type: 'success' });
+        setTimeout(() => {
+          router.push('/pipeline');
+        }, 1500);
+      } else {
+        setToast({ message: 'Failed to create deal', type: 'error' });
+      }
+    } catch (error) {
+      setToast({ message: 'Failed to create deal', type: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const addStakeholder = () => {
+    const newStakeholder = {
+      id: crypto.randomUUID(),
+      name: '',
+      role: '',
+      email: '',
+      phone: '',
+      influence: 'medium' as const,
+      sentiment: 'neutral' as const,
+      notes: ''
+    };
+    
+    setDeal(prev => ({
+      ...prev,
+      stakeholders: [...(prev.stakeholders || []), newStakeholder]
+    }));
+  };
+
+  const removeStakeholder = (id: string) => {
+    setDeal(prev => ({
+      ...prev,
+      stakeholders: prev.stakeholders?.filter(s => s.id !== id) || []
+    }));
+  };
+
+  const updateStakeholder = (id: string, field: string, value: string) => {
+    setDeal(prev => ({
+      ...prev,
+      stakeholders: prev.stakeholders?.map(s => 
+        s.id === id ? { ...s, [field]: value } : s
+      ) || []
+    }));
+  };
+
+  const addNegotiationEntry = () => {
+    const newEntry = {
+      id: crypto.randomUUID(),
+      date: new Date().toISOString(),
+      type: 'meeting' as const,
+      description: '',
+      outcome: '',
+      nextSteps: '',
+      attachments: []
+    };
+    
+    setDeal(prev => ({
+      ...prev,
+      negotiationHistory: [...(prev.negotiationHistory || []), newEntry]
+    }));
+  };
+
+  const removeNegotiationEntry = (id: string) => {
+    setDeal(prev => ({
+      ...prev,
+      negotiationHistory: prev.negotiationHistory?.filter(n => n.id !== id) || []
+    }));
+  };
+
+  const updateNegotiationEntry = (id: string, field: string, value: string) => {
+    setDeal(prev => ({
+      ...prev,
+      negotiationHistory: prev.negotiationHistory?.map(n => 
+        n.id === id ? { ...n, [field]: value } : n
+      ) || []
+    }));
+  };
+
+  return (
+    <AppLayout>
+      <div className="max-w-4xl mx-auto space-y-6">
+        {/* Header */}
+        <div className="flex items-center gap-4">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => router.back()}
+            className="flex items-center gap-2"
+          >
+            <ArrowLeftIcon className="h-4 w-4" />
+            Back
+          </Button>
+          <div>
+            <h1 className="text-2xl font-bold" style={{ color: 'var(--foreground)' }}>
+              New Deal
+            </h1>
+            <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>
+              Create a new sales opportunity
+            </p>
+          </div>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-6">
+          {/* Basic Information */}
+          <FormCard title="Basic Information">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label className="block text-sm font-medium mb-2" style={{ color: 'var(--foreground)' }}>
+                  Deal Title *
+                </label>
+                <Input
+                  value={deal.title || ''}
+                  onChange={(e) => setDeal(prev => ({ ...prev, title: e.target.value }))}
+                  placeholder="Enter deal title"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2" style={{ color: 'var(--foreground)' }}>
+                  Customer
+                </label>
+                <Select
+                  value={deal.customerId || ''}
+                  onChange={(e) => {
+                    const customerId = e.target.value;
+                    const customer = customers.find(c => c.id === customerId);
+                    setDeal(prev => ({ 
+                      ...prev, 
+                      customerId,
+                      customerName: customer?.name || ''
+                    }));
+                  }}
+                  options={[
+                    { value: '', label: 'Select a customer' },
+                    ...customers.map(customer => ({
+                      value: customer.id,
+                      label: customer.name
+                    }))
+                  ]}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2" style={{ color: 'var(--foreground)' }}>
+                  Deal Value *
+                </label>
+                <Input
+                  type="number"
+                  value={deal.value || 0}
+                  onChange={(e) => setDeal(prev => ({ ...prev, value: parseFloat(e.target.value) || 0 }))}
+                  placeholder="0.00"
+                  min="0"
+                  step="0.01"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2" style={{ color: 'var(--foreground)' }}>
+                  Probability (%)
+                </label>
+                <Input
+                  type="number"
+                  value={deal.probability || 0}
+                  onChange={(e) => setDeal(prev => ({ ...prev, probability: parseInt(e.target.value) || 0 }))}
+                  placeholder="0"
+                  min="0"
+                  max="100"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2" style={{ color: 'var(--foreground)' }}>
+                  Stage
+                </label>
+                <Select
+                  value={deal.stage || 'lead'}
+                  onChange={(e) => setDeal(prev => ({ ...prev, stage: e.target.value as Deal['stage'] }))}
+                  options={[
+                    { value: 'lead', label: 'Lead' },
+                    { value: 'qualified', label: 'Qualified' },
+                    { value: 'proposal', label: 'Proposal' },
+                    { value: 'negotiation', label: 'Negotiation' },
+                    { value: 'closed-won', label: 'Closed Won' },
+                    { value: 'closed-lost', label: 'Closed Lost' }
+                  ]}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2" style={{ color: 'var(--foreground)' }}>
+                  Priority
+                </label>
+                <Select
+                  value={deal.priority || 'medium'}
+                  onChange={(e) => setDeal(prev => ({ ...prev, priority: e.target.value as Deal['priority'] }))}
+                  options={[
+                    { value: 'low', label: 'Low' },
+                    { value: 'medium', label: 'Medium' },
+                    { value: 'high', label: 'High' },
+                    { value: 'critical', label: 'Critical' }
+                  ]}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2" style={{ color: 'var(--foreground)' }}>
+                  Expected Close Date
+                </label>
+                <Input
+                  type="date"
+                  value={deal.expectedCloseDate ? new Date(deal.expectedCloseDate).toISOString().split('T')[0] : ''}
+                  onChange={(e) => setDeal(prev => ({ 
+                    ...prev, 
+                    expectedCloseDate: e.target.value ? new Date(e.target.value).toISOString() : undefined 
+                  }))}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2" style={{ color: 'var(--foreground)' }}>
+                  Source
+                </label>
+                <Input
+                  value={deal.source || ''}
+                  onChange={(e) => setDeal(prev => ({ ...prev, source: e.target.value }))}
+                  placeholder="e.g., Website, Referral, Cold Call"
+                />
+              </div>
+            </div>
+
+            <div className="mt-6">
+              <label className="block text-sm font-medium mb-2" style={{ color: 'var(--foreground)' }}>
+                Notes
+              </label>
+              <Textarea
+                value={deal.notes || ''}
+                onChange={(e) => setDeal(prev => ({ ...prev, notes: e.target.value }))}
+                placeholder="Additional notes about this deal..."
+                rows={4}
+              />
+            </div>
+          </FormCard>
+
+          {/* Stakeholders */}
+          <FormCard 
+            title="Stakeholders" 
+            headerActions={
+              <Button type="button" variant="outline" size="sm" onClick={addStakeholder}>
+                <PlusIcon className="h-4 w-4 mr-1" />
+                Add Stakeholder
+              </Button>
+            }
+          >
+            {deal.stakeholders?.length === 0 ? (
+              <div className="text-center py-8" style={{ color: 'var(--muted-foreground)' }}>
+                <p>No stakeholders added yet.</p>
+                <p className="text-sm">Add stakeholders to track decision makers and influencers.</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {deal.stakeholders?.map((stakeholder, index) => (
+                  <div key={stakeholder.id} className="border rounded-lg p-4" style={{ borderColor: 'var(--border)' }}>
+                    <div className="flex items-center justify-between mb-4">
+                      <h4 className="font-medium" style={{ color: 'var(--foreground)' }}>
+                        Stakeholder {index + 1}
+                      </h4>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removeStakeholder(stakeholder.id)}
+                        className="text-red-600 hover:text-red-700"
+                      >
+                        <TrashIcon className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-xs font-medium mb-1" style={{ color: 'var(--muted-foreground)' }}>
+                          Name *
+                        </label>
+                        <Input
+                          value={stakeholder.name}
+                          onChange={(e) => updateStakeholder(stakeholder.id, 'name', e.target.value)}
+                          placeholder="Full name"
+                          required
+                        />
+                      </div>
+                      
+                      <div>
+                        <label className="block text-xs font-medium mb-1" style={{ color: 'var(--muted-foreground)' }}>
+                          Role *
+                        </label>
+                        <Input
+                          value={stakeholder.role}
+                          onChange={(e) => updateStakeholder(stakeholder.id, 'role', e.target.value)}
+                          placeholder="e.g., CEO, IT Director"
+                          required
+                        />
+                      </div>
+                      
+                      <div>
+                        <label className="block text-xs font-medium mb-1" style={{ color: 'var(--muted-foreground)' }}>
+                          Email
+                        </label>
+                        <Input
+                          type="email"
+                          value={stakeholder.email}
+                          onChange={(e) => updateStakeholder(stakeholder.id, 'email', e.target.value)}
+                          placeholder="email@company.com"
+                        />
+                      </div>
+                      
+                      <div>
+                        <label className="block text-xs font-medium mb-1" style={{ color: 'var(--muted-foreground)' }}>
+                          Phone
+                        </label>
+                        <Input
+                          value={stakeholder.phone}
+                          onChange={(e) => updateStakeholder(stakeholder.id, 'phone', e.target.value)}
+                          placeholder="+1 (555) 123-4567"
+                        />
+                      </div>
+                      
+                      <div>
+                        <label className="block text-xs font-medium mb-1" style={{ color: 'var(--muted-foreground)' }}>
+                          Influence
+                        </label>
+                        <Select
+                          value={stakeholder.influence}
+                          onChange={(e) => updateStakeholder(stakeholder.id, 'influence', e.target.value)}
+                          options={[
+                            { value: 'low', label: 'Low' },
+                            { value: 'medium', label: 'Medium' },
+                            { value: 'high', label: 'High' }
+                          ]}
+                        />
+                      </div>
+                      
+                      <div>
+                        <label className="block text-xs font-medium mb-1" style={{ color: 'var(--muted-foreground)' }}>
+                          Sentiment
+                        </label>
+                        <Select
+                          value={stakeholder.sentiment}
+                          onChange={(e) => updateStakeholder(stakeholder.id, 'sentiment', e.target.value)}
+                          options={[
+                            { value: 'positive', label: 'Positive' },
+                            { value: 'neutral', label: 'Neutral' },
+                            { value: 'negative', label: 'Negative' }
+                          ]}
+                        />
+                      </div>
+                    </div>
+                    
+                    <div className="mt-4">
+                      <label className="block text-xs font-medium mb-1" style={{ color: 'var(--muted-foreground)' }}>
+                        Notes
+                      </label>
+                      <Textarea
+                        value={stakeholder.notes}
+                        onChange={(e) => updateStakeholder(stakeholder.id, 'notes', e.target.value)}
+                        placeholder="Additional notes about this stakeholder..."
+                        rows={2}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </FormCard>
+
+          {/* Negotiation History */}
+          <FormCard 
+            title="Negotiation History" 
+            headerActions={
+              <Button type="button" variant="outline" size="sm" onClick={addNegotiationEntry}>
+                <PlusIcon className="h-4 w-4 mr-1" />
+                Add Entry
+              </Button>
+            }
+          >
+            {deal.negotiationHistory?.length === 0 ? (
+              <div className="text-center py-8" style={{ color: 'var(--muted-foreground)' }}>
+                <p>No negotiation entries yet.</p>
+                <p className="text-sm">Track meetings, calls, and negotiations here.</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {deal.negotiationHistory?.map((entry, index) => (
+                  <div key={entry.id} className="border rounded-lg p-4" style={{ borderColor: 'var(--border)' }}>
+                    <div className="flex items-center justify-between mb-4">
+                      <h4 className="font-medium" style={{ color: 'var(--foreground)' }}>
+                        Entry {index + 1}
+                      </h4>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removeNegotiationEntry(entry.id)}
+                        className="text-red-600 hover:text-red-700"
+                      >
+                        <TrashIcon className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-medium mb-1" style={{ color: 'var(--muted-foreground)' }}>
+                          Date
+                        </label>
+                        <Input
+                          type="datetime-local"
+                          value={entry.date ? new Date(entry.date).toISOString().slice(0, 16) : ''}
+                          onChange={(e) => updateNegotiationEntry(entry.id, 'date', e.target.value ? new Date(e.target.value).toISOString() : '')}
+                        />
+                      </div>
+                      
+                      <div>
+                        <label className="block text-xs font-medium mb-1" style={{ color: 'var(--muted-foreground)' }}>
+                          Type
+                        </label>
+                        <Select
+                          value={entry.type}
+                          onChange={(e) => updateNegotiationEntry(entry.id, 'type', e.target.value)}
+                          options={[
+                            { value: 'meeting', label: 'Meeting' },
+                            { value: 'call', label: 'Call' },
+                            { value: 'email', label: 'Email' },
+                            { value: 'proposal', label: 'Proposal' },
+                            { value: 'counter-offer', label: 'Counter Offer' },
+                            { value: 'concession', label: 'Concession' }
+                          ]}
+                        />
+                      </div>
+                    </div>
+                    
+                    <div className="mt-4">
+                      <label className="block text-xs font-medium mb-1" style={{ color: 'var(--muted-foreground)' }}>
+                        Description *
+                      </label>
+                      <Textarea
+                        value={entry.description}
+                        onChange={(e) => updateNegotiationEntry(entry.id, 'description', e.target.value)}
+                        placeholder="Describe what happened..."
+                        rows={3}
+                        required
+                      />
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                      <div>
+                        <label className="block text-xs font-medium mb-1" style={{ color: 'var(--muted-foreground)' }}>
+                          Outcome
+                        </label>
+                        <Textarea
+                          value={entry.outcome}
+                          onChange={(e) => updateNegotiationEntry(entry.id, 'outcome', e.target.value)}
+                          placeholder="What was the result?"
+                          rows={2}
+                        />
+                      </div>
+                      
+                      <div>
+                        <label className="block text-xs font-medium mb-1" style={{ color: 'var(--muted-foreground)' }}>
+                          Next Steps
+                        </label>
+                        <Textarea
+                          value={entry.nextSteps}
+                          onChange={(e) => updateNegotiationEntry(entry.id, 'nextSteps', e.target.value)}
+                          placeholder="What are the next steps?"
+                          rows={2}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </FormCard>
+
+          {/* Actions */}
+          <div className="flex items-center justify-end gap-4">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => router.back()}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={loading}
+              className="flex items-center gap-2"
+            >
+              {loading ? 'Creating...' : 'Create Deal'}
+            </Button>
+          </div>
+        </form>
+
+        {/* Toast Notifications */}
+        {toast && (
+          <Toast
+            title={toast.message}
+            variant={toast.type}
+            onClose={() => setToast(null)}
+          >
+            {toast.message}
+          </Toast>
+        )}
+      </div>
+    </AppLayout>
+  );
+}

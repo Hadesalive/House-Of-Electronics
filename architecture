@@ -1,0 +1,803 @@
+# House of Electronics Sales Management System - Complete Architecture Documentation
+
+## Table of Contents
+1. [System Overview](#system-overview)
+2. [Architecture](#architecture)
+3. [File Structure](#file-structure)
+4. [Pages Documentation](#pages-documentation)
+5. [IPC Handlers Documentation](#ipc-handlers-documentation)
+6. [Database Schema](#database-schema)
+7. [Key Services](#key-services)
+8. [Development Guidelines](#development-guidelines)
+
+---
+
+## System Overview
+
+**House of Electronics Sales Manager** is an Electron-based desktop application for managing sales, customers, products, invoices, orders, returns, and credits. It uses:
+- **Frontend**: React 19 + TypeScript + Vite
+- **Backend**: Electron (Main Process) + Node.js
+- **Database**: SQLite (better-sqlite3)
+- **License System**: RSA-based activation with machine binding
+
+---
+
+## Architecture
+
+### High-Level Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Electron Main Process                     │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
+│  │  main.js     │  │  IPC Handlers │  │   Services   │      │
+│  │  (Entry)     │→ │  (Bridge)    │→ │  (Business)  │      │
+│  └──────────────┘  └──────────────┘  └──────────────┘      │
+│         │                 │                  │              │
+│         └─────────────────┼──────────────────┘             │
+│                           │                                  │
+│                    ┌──────▼──────┐                           │
+│                    │  Database   │                           │
+│                    │  (SQLite)  │                           │
+│                    └────────────┘                           │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            │ IPC (Inter-Process Communication)
+                            │
+┌───────────────────────────▼─────────────────────────────────┐
+│              Electron Renderer Process (React)               │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
+│  │  Pages       │  │  Components  │  │  Services    │      │
+│  │  (Routes)    │→ │  (UI)        │→ │  (IPC Calls) │      │
+│  └──────────────┘  └──────────────┘  └──────────────┘      │
+│         │                 │                  │              │
+│         └─────────────────┼──────────────────┘             │
+│                           │                                  │
+│                    ┌──────▼──────┐                           │
+│                    │  preload.js │                           │
+│                    │  (Bridge)  │                           │
+│                    └────────────┘                           │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Process Communication Flow
+
+1. **React Component** → Calls `window.electronAPI.methodName()`
+2. **preload.js** → Exposes safe IPC methods via `contextBridge`
+3. **IPC Handler** → Receives call in main process via `ipcMain.handle()`
+4. **Database Service** → Executes business logic and database operations
+5. **Response** → Returns through IPC back to React component
+
+### Critical Initialization Order
+
+```
+1. License Validation (activation-service.js)
+   ↓
+2. Database Initialization (database-service.js)
+   ↓
+3. IPC Handler Registration (handlers/index.js)
+   ↓
+4. Window Creation (window-manager.js)
+   ↓
+5. Menu Creation (menu-manager.js)
+```
+
+**⚠️ WARNING**: Never modify the initialization order in `main.js`. License validation MUST happen before database access.
+
+---
+
+## File Structure
+
+### Root Directory
+```
+sales-management-system-electron/
+├── electron/                    # Electron main process code
+│   ├── main.js                  # Application entry point
+│   ├── preload.js               # IPC bridge (exposes safe APIs)
+│   ├── window-manager.js        # Window creation and management
+│   ├── menu-manager.js          # Application menu setup
+│   ├── handlers/                # IPC handlers (one per domain)
+│   │   ├── index.js            # Registers all handlers
+│   │   ├── customer-handlers.js
+│   │   ├── product-handlers.js
+│   │   ├── sales-handlers.js
+│   │   ├── invoice-handlers.js
+│   │   ├── order-handlers.js
+│   │   ├── return-handlers.js
+│   │   ├── credit-handlers.js
+│   │   ├── settings-handlers.js
+│   │   ├── data-handlers.js
+│   │   ├── email-handlers.js
+│   │   ├── pdf-handlers.js
+│   │   ├── license-handlers.js
+│   │   ├── backup-handlers.js
+│   │   └── validation-handlers.js
+│   ├── services/               # Business logic services
+│   │   ├── database-service.js # Main database operations
+│   │   ├── activation-service.js # License validation
+│   │   ├── backup-service.js
+│   │   ├── transaction-service.js # Transaction management
+│   │   └── telemetry-service.js
+│   ├── schema/                 # Database schema
+│   │   └── sqlite-schema.js
+│   └── pdf-renderer/           # PDF generation
+│       └── invoice-renderer.js
+├── src/                         # React frontend code
+│   ├── main.tsx                # React entry point
+│   ├── App.tsx                 # Main app component (routes)
+│   ├── pages/                  # Page components (35 files)
+│   ├── components/             # Reusable UI components
+│   ├── contexts/               # React contexts (state management)
+│   ├── lib/                    # Utilities and services
+│   └── types/                  # TypeScript type definitions
+├── public/                      # Static assets
+├── dist/                        # Build output (Vite)
+└── house-of-electronics-sales.db           # SQLite database file
+```
+
+---
+
+## Pages Documentation
+
+### Page Organization
+
+All pages are located in `src/pages/` and are routed through `src/App.tsx` using React Router.
+
+### Core Pages
+
+#### 1. **HomePage.tsx** (`/`)
+- **Purpose**: Landing page after login/activation
+- **Features**: Quick navigation to main sections
+- **IPC Calls**: None (static navigation)
+
+#### 2. **DashboardPage.tsx** (`/`)
+- **Purpose**: Main dashboard with KPIs, charts, and recent activity
+- **Features**:
+  - Revenue statistics
+  - Sales charts (line/bar)
+  - Recent sales, customers, products
+  - Quick actions panel
+- **IPC Calls**: 
+  - `getSales()`, `getCustomers()`, `getProducts()`, `getReturns()`
+- **Dependencies**: Chart.js, dashboard components
+
+#### 3. **OnboardingPage.tsx** (`/onboarding`)
+- **Purpose**: First-time setup wizard
+- **Features**: Company settings, preferences setup
+- **IPC Calls**: 
+  - `updateCompanySettings()`, `updatePreferences()`
+
+### Customer Management Pages
+
+#### 4. **CustomersPage.tsx** (`/customers`)
+- **Purpose**: List all customers with search/filter
+- **IPC Calls**: `getCustomers()`, `searchCustomers()`, `deleteCustomer()`
+- **Navigation**: → `/customers/new`, `/customers/:id`
+
+#### 5. **CustomerNewPage.tsx** (`/customers/new`)
+- **Purpose**: Create new customer
+- **IPC Calls**: `createCustomer()`
+- **Fields**: Name, email, phone, address, notes
+
+#### 6. **CustomerDetailPage.tsx** (`/customers/:id`)
+- **Purpose**: View/edit customer details, transaction history
+- **IPC Calls**: 
+  - `getCustomerById()`, `updateCustomer()`, `getSales()`, `getInvoices()`
+  - `addCustomerStoreCredit()` - Add store credit manually
+
+### Product Management Pages
+
+#### 7. **ProductsPage.tsx** (`/products`)
+- **Purpose**: List all products with inventory status
+- **IPC Calls**: `getProducts()`, `deleteProduct()`
+- **Features**: Stock levels, low stock warnings
+
+#### 8. **ProductNewPage.tsx** (`/products/new`)
+- **Purpose**: Create new product
+- **IPC Calls**: `createProduct()`
+- **Fields**: Name, SKU, price, cost, stock, description, category
+
+#### 9. **ProductDetailPage.tsx** (`/products/:id`)
+- **Purpose**: View/edit product details, sales history
+- **IPC Calls**: `getProductById()`, `updateProduct()`, `getSales()`
+
+### Sales Pages
+
+#### 10. **SalesPage.tsx** (`/sales`)
+- **Purpose**: List all sales transactions
+- **IPC Calls**: `getSales()`, `deleteSale()`
+- **Features**: Filter by date, customer, status
+
+#### 11. **SaleNewPage.tsx** (`/sales/new`)
+- **Purpose**: Create new sale transaction
+- **IPC Calls**: 
+  - `getProducts()`, `getCustomers()`, `createSale()`
+  - `applyCustomerCreditToSale()` - Apply store credit
+- **⚠️ CRITICAL**: Automatically deducts stock from products
+
+#### 12. **SaleDetailPage.tsx** (`/sales/:id`)
+- **Purpose**: View sale details, generate invoice
+- **IPC Calls**: `getSaleById()`, `generateInvoice()`, `printReceipt()`
+
+#### 13. **SaleEditPage.tsx** (`/sales/:id/edit`)
+- **Purpose**: Edit existing sale
+- **IPC Calls**: `getSaleById()`, `updateSale()`
+- **⚠️ CRITICAL**: Stock adjustments handled automatically (restores old, deducts new)
+
+### Invoice Pages
+
+#### 14. **InvoicesPage.tsx** (`/invoices`)
+- **Purpose**: List all invoices (regular + credit notes)
+- **IPC Calls**: `getInvoices()`, `deleteInvoice()`
+- **Features**: Filter by status, type, customer
+
+#### 15. **InvoiceNewPage.tsx** (`/invoices/new`)
+- **Purpose**: Create standalone invoice (not from sale)
+- **IPC Calls**: 
+  - `getCustomers()`, `getProducts()`, `createInvoice()`
+  - `getInvoiceTemplates()` - Template selection
+- **⚠️ CRITICAL**: If status is "paid", deducts stock automatically
+
+#### 16. **InvoiceDetailPage.tsx** (`/invoices/:id`)
+- **Purpose**: View invoice, record payments, email PDF
+- **IPC Calls**: 
+  - `getInvoiceById()`, `updateInvoice()`
+  - `applyCustomerCredit()` - Apply store credit to invoice
+  - `handleInvoiceOverpayment()` - Handle overpayment scenarios
+  - `emailInvoice()`, `generateInvoicePdfFromHtml()`
+
+#### 17. **InvoiceEditPage.tsx** (`/invoices/:id/edit`)
+- **Purpose**: Edit invoice details
+- **IPC Calls**: `getInvoiceById()`, `updateInvoice()`
+- **⚠️ CRITICAL**: Stock management on status changes (paid ↔ cancelled)
+
+#### 18. **InvoiceTemplatesPage.tsx** (`/invoices/templates`)
+- **Purpose**: Manage invoice templates
+- **IPC Calls**: 
+  - `getInvoiceTemplates()`, `createInvoiceTemplate()`
+  - `updateInvoiceTemplate()`, `deleteInvoiceTemplate()`
+
+### Order Pages
+
+#### 19. **OrdersPage.tsx** (`/orders`)
+- **Purpose**: List purchase orders from suppliers
+- **IPC Calls**: `getOrders()`, `deleteOrder()`
+
+#### 20. **OrderNewPage.tsx** (`/orders/new`)
+- **Purpose**: Create new purchase order
+- **IPC Calls**: `getProducts()`, `createOrder()`
+- **⚠️ CRITICAL**: If status is "delivered", adds stock to products
+
+#### 21. **OrderDetailPage.tsx** (`/orders/:id`)
+- **Purpose**: View order details
+- **IPC Calls**: `getOrderById()`
+
+#### 22. **OrderEditPage.tsx** (`/orders/:id/edit`)
+- **Purpose**: Edit order, mark as delivered
+- **IPC Calls**: `getOrderById()`, `updateOrder()`
+- **⚠️ CRITICAL**: Stock management on status changes (delivered ↔ other)
+
+### Return Pages
+
+#### 23. **ReturnsPage.tsx** (`/returns`)
+- **Purpose**: List product returns
+- **IPC Calls**: `getReturns()`, `deleteReturn()`
+
+#### 24. **ReturnNewPage.tsx** (`/returns/new`)
+- **Purpose**: Create new return/refund
+- **IPC Calls**: `getSales()`, `getProducts()`, `createReturn()`
+- **⚠️ CRITICAL**: 
+  - If status is "completed", restores stock
+  - If refund method is "store_credit", adds to customer credit
+
+#### 25. **ReturnDetailPage.tsx** (`/returns/:id`)
+- **Purpose**: View return details
+- **IPC Calls**: `getReturnById()`
+
+#### 26. **ReturnEditPage.tsx** (`/returns/:id/edit`)
+- **Purpose**: Edit return, approve/complete
+- **IPC Calls**: `getReturnById()`, `updateReturn()`
+- **⚠️ CRITICAL**: Stock and credit management on status changes
+
+### Credit/Debt Pages
+
+#### 27. **CreditPage.tsx** (`/credit`)
+- **Purpose**: List customer debts/credits
+- **IPC Calls**: `getAllDebts()`, `deleteDebt()`
+
+#### 28. **CreditNewPage.tsx** (`/credit/new`)
+- **Purpose**: Record new customer debt
+- **IPC Calls**: `getCustomers()`, `addDebt()`
+
+#### 29. **CreditDetailPage.tsx** (`/credit/:id`)
+- **Purpose**: View debt details, record payments
+- **IPC Calls**: 
+  - `getAllDebts()` (filtered by ID), `addDebtPayment()`
+  - `convertDebtToSale()` - Convert debt to sale transaction
+
+### System Pages
+
+#### 30. **InventoryPage.tsx** (`/inventory`)
+- **Purpose**: Inventory overview, low stock alerts
+- **IPC Calls**: `getProducts()`
+- **Features**: Stock levels, reorder points
+
+#### 31. **ReportsPage.tsx** (`/reports`)
+- **Purpose**: Financial reports (password protected)
+- **IPC Calls**: 
+  - `getReportsPassword()`, `setReportsPassword()`
+  - `getSales()`, `getInvoices()`, `getCustomers()`
+- **Features**: Revenue reports, profit analysis
+
+#### 32. **SettingsPage.tsx** (`/settings`)
+- **Purpose**: Application settings
+- **IPC Calls**: 
+  - `getCompanySettings()`, `updateCompanySettings()`
+  - `getPreferences()`, `updatePreferences()`
+  - `getBackupList()`, `createBackup()`, `restoreBackup()`
+
+#### 33. **ActivationPage.tsx** (`/activation`)
+- **Purpose**: License activation interface
+- **IPC Calls**: 
+  - `getActivationStatus()`, `getMachineIdentifier()`
+  - `importLicenseFile()`, `importLicenseData()`
+  - `exportActivationRequest()`, `deactivateLicense()`
+
+#### 34. **LicenseBlockedPage.tsx** (`/license-blocked`)
+- **Purpose**: Shown when license is invalid
+- **IPC Calls**: `getActivationStatus()`, `retryLicenseValidation()`
+
+#### 35. **TestPage.tsx** (`/test`)
+- **Purpose**: Development/testing page
+- **IPC Calls**: Various (for testing)
+
+---
+
+## IPC Handlers Documentation
+
+### Handler Registration
+
+All handlers are registered in `electron/handlers/index.js` in this order:
+1. License handlers (FIRST - security critical)
+2. Settings handlers
+3. Data handlers
+4. Customer handlers
+5. Product handlers
+6. Sales handlers
+7. Invoice handlers
+8. Order handlers
+9. Return handlers
+10. Credit handlers
+11. Validation handlers
+12. Backup handlers
+13. Email handlers
+14. PDF handlers
+
+### Customer Handlers (`customer-handlers.js`)
+
+| IPC Channel | Purpose | Parameters | Returns |
+|------------|---------|------------|---------|
+| `get-customers` | Get all customers | None | `{success, data: Customer[]}` |
+| `get-customer-by-id` | Get single customer | `id: string` | `{success, data: Customer}` |
+| `create-customer` | Create new customer | `customerData: object` | `{success, data: Customer}` |
+| `update-customer` | Update customer | `{id, updates}` | `{success, data: Customer}` |
+| `delete-customer` | Delete customer | `id: string` | `{success}` |
+| `search-customers` | Search customers | `query: string` | `{success, data: Customer[]}` |
+| `get-customer-stats` | Get customer statistics | None | `{success, data: Stats}` |
+| `add-customer-store-credit` | Add store credit | `{customerId, creditAmount, reason}` | `{success, data: {customer, newCredit}}` |
+
+**⚠️ Important**: Store credit is stored in `customer.storeCredit` field. Always validate credit amount before applying.
+
+### Product Handlers (`product-handlers.js`)
+
+| IPC Channel | Purpose | Parameters | Returns |
+|------------|---------|------------|---------|
+| `get-products` | Get all products | None | `{success, data: Product[]}` |
+| `get-product-by-id` | Get single product | `id: string` | `{success, data: Product}` |
+| `create-product` | Create new product | `productData: object` | `{success, data: Product}` |
+| `update-product` | Update product | `id, updates` | `{success, data: Product}` |
+| `delete-product` | Delete product | `id: string` | `{success}` |
+
+**⚠️ Important**: 
+- `cost` field is optional (can be null/undefined)
+- `cost` must be >= 0 if provided
+- Stock is managed automatically by sales/orders/returns
+
+### Sales Handlers (`sales-handlers.js`)
+
+| IPC Channel | Purpose | Parameters | Returns |
+|------------|---------|------------|---------|
+| `get-sales` | Get all sales | None | `{success, data: Sale[]}` |
+| `get-sale-by-id` | Get single sale | `id: string` | `{success, data: Sale}` |
+| `create-sale` | Create new sale | `saleData: object` | `{success, data: Sale, warnings?}` |
+| `update-sale` | Update sale | `{id, updates}` | `{success, data: Sale, warnings?}` |
+| `delete-sale` | Delete sale | `id: string` | `{success}` |
+| `generate-invoice` | Generate invoice from sale | `saleId: string` | `{success, data: Invoice}` |
+| `print-receipt` | Print receipt | `saleId: string` | `{success}` |
+| `apply-customer-credit-to-sale` | Apply store credit | `{saleId, customerId, creditAmount}` | `{success, message, data}` |
+
+**⚠️ CRITICAL STOCK MANAGEMENT**:
+- `create-sale`: Automatically deducts stock for each item
+- `update-sale`: Restores old stock, deducts new stock (if items changed)
+- `delete-sale`: Restores stock for all items
+- Backorders are allowed (negative stock with warnings)
+
+**Transaction Safety**: All stock operations use `executeInTransaction()` to ensure atomicity.
+
+### Invoice Handlers (`invoice-handlers.js`)
+
+| IPC Channel | Purpose | Parameters | Returns |
+|------------|---------|------------|---------|
+| `get-invoices` | Get all invoices | None | `{success, data: Invoice[]}` |
+| `get-invoice-by-id` | Get single invoice | `id: string` | `{success, data: Invoice}` |
+| `create-invoice` | Create invoice | `invoiceData: object` | `{success, data: Invoice, warning?}` |
+| `update-invoice` | Update invoice | `{id, body}` | `{success, data: Invoice}` |
+| `delete-invoice` | Delete invoice | `id: string` | `{success}` |
+| `get-invoice-templates` | Get templates | None | `{success, data: Template[]}` |
+| `get-invoice-template` | Get single template | `id: string` | `{success, data: Template}` |
+| `create-invoice-template` | Create template | `templateData: object` | `{success, data: Template}` |
+| `update-invoice-template` | Update template | `id, data` | `{success, data: Template}` |
+| `delete-invoice-template` | Delete template | `id: string` | `{success}` |
+| `handle-invoice-overpayment` | Handle overpayment | `{invoiceId, action, overpaymentAmount, customerId}` | `{success, message, data}` |
+| `apply-customer-credit` | Apply store credit | `{invoiceId, customerId, creditAmount}` | `{success, message, data}` |
+
+**⚠️ CRITICAL STOCK MANAGEMENT**:
+- **Independent invoices** (no `saleId`): Stock deducted when status = "paid"
+- **Stock restored** when status changes from "paid" to "cancelled"
+- **Stock restored** when paid independent invoice is deleted
+
+**Credit Notes**:
+- When `invoiceType = 'credit_note'` and status = "paid": Adds to customer `storeCredit`
+- When cancelled: Removes from customer `storeCredit`
+
+**Overpayment Handling**:
+- `action: 'store-credit'` - Convert overpayment to store credit
+- `action: 'refunded'` - Mark as refunded
+- `action: 'keep'` - Keep on account
+
+### Order Handlers (`order-handlers.js`)
+
+| IPC Channel | Purpose | Parameters | Returns |
+|------------|---------|------------|---------|
+| `get-orders` | Get all orders | None | `{success, data: Order[]}` |
+| `get-order-by-id` | Get single order | `id: string` | `{success, data: Order}` |
+| `create-order` | Create purchase order | `orderData: object` | `{success, data: Order}` |
+| `update-order` | Update order | `{id, updates}` | `{success, data: Order}` |
+| `delete-order` | Delete order | `id: string` | `{success}` |
+
+**⚠️ CRITICAL STOCK MANAGEMENT**:
+- `create-order` with `status = 'delivered'`: Adds stock to products
+- `update-order` to `status = 'delivered'`: Adds stock
+- `update-order` from `status = 'delivered'` to other: Removes stock
+- `delete-order` with `status = 'delivered'`: Removes stock
+
+### Return Handlers (`return-handlers.js`)
+
+| IPC Channel | Purpose | Parameters | Returns |
+|------------|---------|------------|---------|
+| `get-returns` | Get all returns | None | `{success, data: Return[]}` |
+| `get-return-by-id` | Get single return | `id: string` | `{success, data: Return}` |
+| `create-return` | Create return | `returnData: object` | `{success, data: Return}` |
+| `update-return` | Update return | `{id, updates}` | `{success, data: Return}` |
+| `delete-return` | Delete return | `id: string` | `{success}` |
+
+**⚠️ CRITICAL STOCK & CREDIT MANAGEMENT**:
+- `create-return` with `status = 'completed'` or `'approved'`:
+  - Restores stock to products
+  - If `refundMethod = 'store_credit'`: Adds to customer `storeCredit`
+- `update-return` to `'completed'/'approved'`: Same as above
+- `delete-return` with `'completed'/'approved'`:
+  - Removes restored stock
+  - Removes added store credit (if applicable)
+
+### Credit/Debt Handlers (`credit-handlers.js`)
+
+| IPC Channel | Purpose | Parameters | Returns |
+|------------|---------|------------|---------|
+| `get-all-debts` | Get all debts | None | `{success, data: Debt[]}` |
+| `add-debt` | Create new debt | `debtData: object` | `{success, data: Debt}` |
+| `add-debt-payment` | Record payment | `paymentData: object` | `{success, data: Payment}` |
+| `convert-debt-to-sale` | Convert to sale | `data: object` | `{success, data: {sale, debtId}}` |
+| `delete-debt` | Delete debt | `id: string` | `{success}` |
+
+**Note**: Debts are separate from store credit. Store credit is managed through customer records.
+
+### Settings Handlers (`settings-handlers.js`)
+
+| IPC Channel | Purpose | Parameters | Returns |
+|------------|---------|------------|---------|
+| `get-company-settings` | Get company info | None | `{success, data: Settings}` |
+| `update-company-settings` | Update company | `settings: object` | `{success, data: Settings}` |
+| `get-preferences` | Get preferences | None | `{success, data: Preferences}` |
+| `update-preferences` | Update preferences | `preferences: object` | `{success, data: Preferences}` |
+| `get-reports-password` | Get reports password | None | `{success, data: string}` |
+| `set-reports-password` | Set reports password | `password: string` | `{success}` |
+
+### Data Handlers (`data-handlers.js`)
+
+| IPC Channel | Purpose | Parameters | Returns |
+|------------|---------|------------|---------|
+| `export-data` | Export all data | None | `{success, path: string}` |
+| `import-data` | Import data | None | `{success, data: object}` |
+| `save-data` | Legacy save | `data: object` | `{success}` |
+| `load-data` | Legacy load | None | `{success, data: object}` |
+
+**Note**: `export-data` and `import-data` show file dialogs. Use for backup/restore.
+
+### Email Handlers (`email-handlers.js`)
+
+| IPC Channel | Purpose | Parameters | Returns |
+|------------|---------|------------|---------|
+| `email-invoice` | Email invoice PDF | `{to, subject, body, pdfBase64, fileName}` | `{success, message, pdfPath}` |
+| `cleanup-temp-invoices` | Clean temp files | None | `{success}` |
+
+**Platform-Specific**:
+- **macOS**: Opens Mail.app with attachment
+- **Windows/Linux**: Opens email client + shows PDF in file explorer
+
+### PDF Handlers (`pdf-handlers.js`)
+
+| IPC Channel | Purpose | Parameters | Returns |
+|------------|---------|------------|---------|
+| `generate-invoice-pdf-from-html` | Generate PDF | `{htmlContent}` | `string` (base64 PDF) |
+| `download-pdf-file` | Save PDF | `{pdfBase64, filename}` | `{success, filePath}` |
+
+**Implementation**: Uses Electron's native `printToPDF()` API (more reliable than Puppeteer in Electron).
+
+### License Handlers (`license-handlers.js`)
+
+| IPC Channel | Purpose | Parameters | Returns |
+|------------|---------|------------|---------|
+| `get-activation-status` | Check license | None | `{activated, error?}` |
+| `get-machine-identifier` | Get machine ID | None | `string` |
+| `import-license-file` | Import from file | None | `{success, error?}` |
+| `import-license-data` | Import from data | `licenseData: object` | `{success, error?}` |
+| `export-activation-request` | Export request | None | `{success, error?}` |
+| `deactivate-license` | Deactivate | None | `{success}` |
+| `retry-license-validation` | Retry validation | None | `{success}` |
+| `get-telemetry-summary` | Get telemetry | None | `object` |
+| `set-telemetry-enabled` | Toggle telemetry | `enabled: boolean` | `{success}` |
+
+**⚠️ SECURITY**: License validation happens at startup. Invalid license blocks database access.
+
+### Backup Handlers (`backup-handlers.js`)
+
+| IPC Channel | Purpose | Parameters | Returns |
+|------------|---------|------------|---------|
+| `create-backup` | Create backup | `options?: object` | `{success, backupFileName, error?}` |
+| `get-backup-list` | List backups | None | `{success, backups: Backup[]}` |
+| `restore-backup` | Restore backup | `backupFileName: string` | `{success, error?}` |
+| `delete-backup` | Delete backup | `backupFileName: string` | `{success, error?}` |
+| `export-backup` | Export to external | `backupFileName: string` | `{success, filePath, error?}` |
+| `get-backup-stats` | Get statistics | None | `{totalBackups, totalSize, totalSizeFormatted}` |
+| `schedule-backups` | Schedule auto-backup | `options?: object` | `{success, error?}` |
+
+**Backup Location**: `backups/` directory in app data folder.
+
+### Validation Handlers (`validation-handlers.js`)
+
+| IPC Channel | Purpose | Parameters | Returns |
+|------------|---------|------------|---------|
+| `validate-revenue-calculations` | Check double-counting | None | `{success, data: {issues}}` |
+| `validate-stock-consistency` | Check stock issues | None | `{success, data: {issues}}` |
+| `validate-product-costs` | Check cost data | None | `{success, data: {issues}}` |
+| `run-financial-audit` | Full audit | None | `{success, data: {issues}}` |
+| `validate-sale-consistency` | Validate sale | `saleId: string` | `{success, data: {issues}}` |
+| `get-validation-summary` | Get all issues | None | `{success, data: {totalIssues, errors, warnings}}` |
+
+**Use Cases**: Data integrity checks, financial auditing, debugging.
+
+---
+
+## Database Schema
+
+### Core Tables
+
+**Customers**
+- `id`, `name`, `email`, `phone`, `address`, `notes`, `storeCredit`, `createdAt`, `updatedAt`
+
+**Products**
+- `id`, `name`, `sku`, `price`, `cost` (nullable), `stock`, `minStock`, `description`, `category`, `createdAt`, `updatedAt`
+
+**Sales**
+- `id`, `customerId`, `customerName`, `items` (JSON), `subtotal`, `tax`, `discount`, `total`, `status`, `paymentMethod`, `invoiceId`, `invoiceNumber`, `notes`, `has_backorder`, `backorder_details`, `createdAt`, `updatedAt`
+
+**Invoices**
+- `id`, `number`, `saleId` (nullable), `customerId`, `customerName`, `customerEmail`, `customerAddress`, `customerPhone`, `items` (JSON), `subtotal`, `tax`, `taxes` (JSON), `discount`, `total`, `paidAmount`, `status`, `invoiceType` ('invoice' | 'credit_note'), `dueDate`, `notes`, `terms`, `bankDetails` (JSON), `createdAt`, `updatedAt`
+
+**Orders**
+- `id`, `supplierName`, `items` (JSON), `subtotal`, `tax`, `total`, `status`, `expectedDate`, `notes`, `createdAt`, `updatedAt`
+
+**Returns**
+- `id`, `saleId`, `customerId`, `items` (JSON), `refundAmount`, `refundMethod`, `status`, `reason`, `notes`, `createdAt`, `updatedAt`
+
+**Debts**
+- `id`, `customerId`, `amount`, `balance`, `description`, `createdAt`, `updatedAt`
+
+**Settings**
+- `key`, `value` (JSON)
+
+---
+
+## Key Services
+
+### Database Service (`database-service.js`)
+
+**Purpose**: Central database operations layer
+
+**Key Methods**:
+- `initialize()` - Initialize database, run migrations
+- `getCustomers()`, `createCustomer()`, `updateCustomer()`, `deleteCustomer()`
+- `getProducts()`, `createProduct()`, `updateProduct()`, `deleteProduct()`
+- `getSales()`, `createSale()`, `updateSale()`, `deleteSale()`
+- `getInvoices()`, `createInvoice()`, `updateInvoice()`, `deleteInvoice()`
+- `getOrders()`, `createOrder()`, `updateOrder()`, `deleteOrder()`
+- `getReturns()`, `createReturn()`, `updateReturn()`, `deleteReturn()`
+- `getAllDebts()`, `addDebt()`, `addDebtPayment()`, `convertDebtToSale()`
+- `getCompanySettings()`, `updateCompanySettings()`
+- `getPreferences()`, `updatePreferences()`
+- `exportData()`, `importData()`
+
+**⚠️ Important**: All database operations are synchronous (better-sqlite3). Use transactions for multi-step operations.
+
+### Transaction Service (`transaction-service.js`)
+
+**Purpose**: Ensure atomic database operations
+
+**Key Methods**:
+- `executeInTransaction(db, callback)` - Execute callback in transaction
+- `validateTransaction(result)` - Validate transaction result
+- `logTransaction(operation, metadata)` - Log transaction for debugging
+
+**Usage**:
+```javascript
+await executeInTransaction(databaseService.db, async () => {
+  // Multiple database operations
+  // All succeed or all fail
+});
+```
+
+### Activation Service (`activation-service.js`)
+
+**Purpose**: License validation and activation
+
+**Key Methods**:
+- `isActivated()` - Check if license is valid
+- `getActivationStatus()` - Get detailed status
+- `getMachineIdentifier()` - Get unique machine ID
+- `importLicenseFile(path)` - Import license from file
+- `importLicenseData(data)` - Import license from data
+- `exportActivationRequest(path)` - Export activation request
+- `validateRuntime()` - Runtime validation
+- `startPeriodicValidation()` - Start periodic checks (30 min)
+
+**⚠️ SECURITY**: License validation happens BEFORE database initialization. Invalid license = app quits.
+
+### Backup Service (`backup-service.js`)
+
+**Purpose**: Database backup and restore
+
+**Key Methods**:
+- `createBackup(options)` - Create backup
+- `getBackupList()` - List all backups
+- `restoreBackup(fileName)` - Restore from backup
+- `deleteBackup(fileName)` - Delete backup
+- `exportBackup(fileName, targetPath)` - Export to external location
+- `getBackupStats()` - Get statistics
+
+---
+
+## Development Guidelines
+
+### Adding a New Page
+
+1. Create page component in `src/pages/`
+2. Add route in `src/App.tsx`
+3. Add navigation link in appropriate component
+4. Test IPC calls if needed
+
+### Adding a New IPC Handler
+
+1. Create handler file in `electron/handlers/` (or add to existing)
+2. Export registration function: `function registerXxxHandlers(databaseService)`
+3. Register in `electron/handlers/index.js`
+4. Add to `electron/preload.js` (expose to renderer)
+5. Use in React component via `window.electronAPI.methodName()`
+
+### Stock Management Rules
+
+**⚠️ CRITICAL**: Stock is managed automatically. Never manually update stock.
+
+**Stock Deduction**:
+- Sales: When sale is created
+- Invoices: When independent invoice status = "paid"
+
+**Stock Addition**:
+- Orders: When order status = "delivered"
+- Returns: When return status = "completed" or "approved"
+
+**Stock Restoration**:
+- Sales: When sale is deleted or items updated
+- Invoices: When paid invoice is cancelled or deleted
+- Orders: When delivered order is deleted or status changed
+
+**Always use transactions** for stock operations to ensure consistency.
+
+### Store Credit Management
+
+**Store Credit Addition**:
+- Credit notes: When `invoiceType = 'credit_note'` and status = "paid"
+- Returns: When `refundMethod = 'store_credit'` and status = "completed"
+- Manual: Via `add-customer-store-credit` handler
+
+**Store Credit Deduction**:
+- Sales: Via `apply-customer-credit-to-sale`
+- Invoices: Via `apply-customer-credit`
+- Returns: When store credit return is deleted
+
+**Always validate** credit amount before applying.
+
+### Error Handling
+
+**IPC Handlers**: Always return `{success: boolean, error?: string, data?: any}`
+
+**React Components**: Check `success` field before using `data`
+
+**Example**:
+```typescript
+const result = await window.electronAPI.getCustomers();
+if (result.success) {
+  setCustomers(result.data);
+} else {
+  console.error('Error:', result.error);
+}
+```
+
+### Testing
+
+**Unit Tests**: `tests/` directory
+- `license-system.test.js` - License validation
+- `financial-calculations.test.js` - Financial logic
+- `transaction-safety.test.js` - Transaction integrity
+- `schema-migration.test.js` - Database migrations
+
+**Manual Testing**: See `MANUAL_TESTING_GUIDE.md`
+
+### Debugging
+
+**Main Process**: Check Electron console (terminal where app is launched)
+
+**Renderer Process**: Use DevTools (View → Toggle DevTools)
+
+**IPC Debugging**: Add `console.log` in handlers and preload.js
+
+**Database Debugging**: Use SQLite browser to inspect `house-of-electronics-sales.db`
+
+---
+
+## Common Pitfalls
+
+1. **❌ Modifying initialization order in main.js** - License must validate first
+2. **❌ Manually updating stock** - Use handlers that manage stock automatically
+3. **❌ Not using transactions** - Multi-step operations can corrupt data
+4. **❌ Ignoring warnings** - Stock warnings indicate backorders (negative stock)
+5. **❌ Double-counting revenue** - Sales with invoices should not count invoice revenue separately
+6. **❌ Not validating credit amounts** - Always check available credit before applying
+7. **❌ Forgetting to restore stock** - When deleting sales/invoices/orders, restore stock
+8. **❌ Not handling overpayments** - Use `handle-invoice-overpayment` handler
+
+---
+
+## Support
+
+For issues or questions:
+1. Check this documentation first
+2. Review handler code in `electron/handlers/`
+3. Check database schema in `electron/schema/sqlite-schema.js`
+4. Review test files for usage examples
+
+---
+
+**Last Updated**: 2025-01-XX
+**Version**: 1.0.0
+

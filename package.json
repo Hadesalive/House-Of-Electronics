@@ -1,0 +1,200 @@
+{
+  "name": "house-of-electronics",
+  "version": "1.0.0",
+  "description": "Professional sales management and invoicing desktop application",
+  "author": "Alpha Amadu Bah",
+  "private": true,
+  "main": "electron/main.js",
+  "homepage": "./",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "start": "npx serve dist -p 3000",
+    "lint": "eslint",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:license": "node scripts/test-license-system.js",
+    "test:license:unit": "node scripts/test-license-system.js license-system",
+    "test:license:integration": "node scripts/test-license-system.js integration",
+    "test:license:flow": "node scripts/test-license-system.js flow-simulation",
+    "create-admin": "node scripts/create-admin-user.js",
+    "electron": "electron .",
+    "electron-prod": "cross-env NODE_ENV=production electron .",
+    "optimus-prime": "node scripts/start-dev.js",
+    "electron-dev-alt": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development DEV_PORT=5173 electron .\"",
+    "electron-dev-prod": "npm run build && cross-env NODE_ENV=production electron .",
+    "electron-pack": "npm run build && electron-builder",
+    "pack:mac": "npm run build && electron-builder --mac",
+    "pack:mac:free": "npm run build && electron-builder --mac --config.mac.hardenedRuntime=false",
+    "pack:win": "npm run build && electron-builder --win",
+    "pack:win:enhanced": "npm run build && electron-builder --win",
+    "pack:linux": "npm run build && electron-builder --linux",
+    "pack:all": "npm run build && electron-builder -mwl",
+    "preelectron-pack": "npm run build && npm run postinstall",
+    "postinstall": "npx electron-rebuild"
+  },
+  "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@heroicons/react": "^2.2.0",
+    "@radix-ui/react-slot": "^1.2.3",
+    "@tabler/icons-react": "^3.36.0",
+    "@types/puppeteer": "^5.4.7",
+    "@vitejs/plugin-react": "^5.0.4",
+    "better-sqlite3": "^9.6.0",
+    "chart.js": "^4.5.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "dotenv": "^16.6.1",
+    "express": "^5.1.0",
+    "html2canvas": "^1.4.1",
+    "jimp": "^0.22.12",
+    "jspdf": "^3.0.3",
+    "jspdf-autotable": "^5.0.2",
+    "lucide-react": "^0.544.0",
+    "next": "15.5.4",
+    "node-machine-id": "^1.1.12",
+    "node-rsa": "^1.1.1",
+    "puppeteer": "^24.24.0",
+    "react": "19.1.0",
+    "react-chartjs-2": "^5.3.0",
+    "react-dom": "19.1.0",
+    "react-quill": "^2.0.0",
+    "react-router-dom": "^7.9.4",
+    "recharts": "^3.3.0",
+    "tailwind-merge": "^3.3.1",
+    "tesseract.js": "^5.0.4",
+    "uuid": "^13.0.0",
+    "vite": "^7.1.9",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3",
+    "@types/better-sqlite3": "^7.6.8",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/react-router-dom": "^5.3.3",
+    "@types/uuid": "^10.0.0",
+    "autoprefixer": "^10.4.21",
+    "chokidar": "^4.0.3",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.0.0",
+    "electron": "^22.0.0",
+    "electron-builder": "^26.0.12",
+    "electron-rebuild": "^3.2.9",
+    "eslint": "^9",
+    "eslint-config-next": "15.5.4",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.18",
+    "typescript": "^5",
+    "wait-on": "^9.0.1"
+  },
+  "build": {
+    "appId": "com.Ekhlas Solar Installations.sales-manager",
+    "productName": "House of Electronics",
+    "directories": {
+      "output": "release",
+      "buildResources": "public"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "scripts/**/*",
+      "node_modules/**/*",
+      "package.json",
+      "config.json",
+      "!node_modules/.cache",
+      "!**/*.map",
+      "!release/**/*",
+      "!release/**/*.blockmap",
+      "!.env"
+    ],
+    "asarUnpack": [
+      "node_modules/better-sqlite3/**/*"
+    ],
+    "asar": true,
+    "buildDependenciesFromSource": false,
+    "electronCompile": false,
+    "extraResources": [
+      {
+        "from": "public/images",
+        "to": "images",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "public/icon.ico",
+      "artifactName": "${productName}-${version}-Setup.${ext}",
+      "forceCodeSigning": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "installerIcon": "public/icon.ico",
+      "uninstallerIcon": "public/icon.ico",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true,
+      "shortcutName": "House of Electronics",
+      "menuCategory": "Business",
+      "include": "build/installer.nsh",
+      "installerHeaderIcon": "public/icon.ico",
+      "installerLanguages": [
+        "en_US"
+      ],
+      "multiLanguageInstaller": false,
+      "perMachine": false,
+      "artifactName": "${productName}-${version}-Setup.${ext}",
+      "displayLanguageSelector": false,
+      "packElevateHelper": true
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "public/icon.icns",
+      "category": "public.app-category.business",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "artifactName": "${productName}-${version}.${ext}"
+    },
+    "dmg": {
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "public/icon.png",
+      "category": "Office",
+      "artifactName": "${productName}-${version}.${ext}"
+    }
+  }
+}

@@ -1,0 +1,412 @@
+'use client';
+
+import React, { useState, useEffect, useMemo } from 'react';
+import { AppLayout } from '@/components/layouts/app-layout';
+import { PaginatedTableCard, KPICard } from '@/components/ui/dashboard';
+import { SalesPipeline } from '@/components/ui/sales/sales-pipeline';
+import { Button, Toast } from '@/components/ui/core';
+import { Input } from '@/components/ui/forms';
+import { useSettings } from '@/contexts/SettingsContext';
+import { useRouter } from 'next/navigation';
+import { 
+  PlusIcon, 
+  EyeIcon, 
+  PencilIcon, 
+  TrashIcon,
+  MagnifyingGlassIcon,
+  ChartBarIcon,
+  CurrencyDollarIcon,
+  CheckCircleIcon,
+  UserGroupIcon
+} from '@heroicons/react/24/outline';
+
+// Pipeline stages configuration
+const pipelineStagesConfig = [
+  { id: 'lead', name: 'Lead', color: 'bg-blue-500' },
+  { id: 'qualified', name: 'Qualified', color: 'bg-yellow-500' },
+  { id: 'proposal', name: 'Proposal', color: 'bg-orange-500' },
+  { id: 'negotiation', name: 'Negotiation', color: 'bg-purple-500' },
+  { id: 'closed-won', name: 'Closed Won', color: 'bg-green-500' },
+  { id: 'closed-lost', name: 'Closed Lost', color: 'bg-red-500' }
+];
+
+export default function PipelinePage() {
+  const router = useRouter();
+  const { formatCurrency } = useSettings();
+  
+  interface DealData {
+    id: string;
+    title: string;
+    customer: string;
+    value: number;
+    stage: string;
+    probability: number;
+    createdDate: string;
+    priority?: string;
+    expectedCloseDate?: string;
+    source?: string;
+    notes?: string;
+  }
+
+  interface PipelineStage {
+    id: string;
+    name: string;
+    color: string;
+    deals: DealData[];
+  }
+
+  const [pipelineStages, setPipelineStages] = useState<PipelineStage[]>([]);
+  const [deals, setDeals] = useState<DealData[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [viewMode, setViewMode] = useState<'pipeline' | 'table'>('pipeline');
+
+  // Load deals data
+  useEffect(() => {
+    const loadDeals = async () => {
+      try {
+        const response = await fetch('/api/deals');
+        if (response.ok) {
+          const dealsData = await response.json();
+          setDeals(dealsData);
+          
+          // Transform deals into pipeline stages format
+          const stagesWithDeals = pipelineStagesConfig.map(stage => ({
+            ...stage,
+            deals: dealsData
+              .filter((deal: { stage: string }) => deal.stage === stage.id)
+              .map((deal: { id: string; title: string; customerName: string; value: number; stage: string; probability: number; createdAt: string; priority?: string; expectedCloseDate?: string; source?: string; notes?: string }) => ({
+                id: deal.id,
+                title: deal.title,
+                customer: deal.customerName || 'Unknown Customer',
+                value: deal.value,
+                stage: deal.stage,
+                probability: deal.probability,
+                createdDate: deal.createdAt,
+                priority: deal.priority,
+                expectedCloseDate: deal.expectedCloseDate,
+                source: deal.source,
+                notes: deal.notes
+              }))
+          }));
+          
+          setPipelineStages(stagesWithDeals);
+        }
+      } catch {
+        setToast({ message: 'Failed to load deals', type: 'error' });
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadDeals();
+  }, []);
+
+  // Calculate pipeline stats
+  const stats = useMemo(() => {
+    const allDeals = pipelineStages.flatMap(stage => stage.deals);
+    const totalDeals = allDeals.length;
+    const totalValue = allDeals.reduce((sum, deal) => sum + deal.value, 0);
+    const weightedValue = allDeals.reduce((sum, deal) => sum + (deal.value * deal.probability / 100), 0);
+    const closedWonDeals = pipelineStages.find(stage => stage.id === 'closed-won')?.deals.length || 0;
+    const closedWonValue = pipelineStages.find(stage => stage.id === 'closed-won')?.deals.reduce((sum: number, deal: DealData) => sum + deal.value, 0) || 0;
+    
+    return {
+      totalDeals,
+      totalValue,
+      weightedValue,
+      closedWonDeals,
+      closedWonValue,
+      averageDealSize: totalDeals > 0 ? totalValue / totalDeals : 0
+    };
+  }, [pipelineStages]);
+
+  // Filter deals for table view
+  const filteredDeals = useMemo(() => {
+    const allDeals = pipelineStages.flatMap(stage => 
+      stage.deals.map(deal => ({ ...deal, stageName: stage.name }))
+    );
+    
+    if (!searchTerm) return allDeals;
+    
+    return allDeals.filter((deal: DealData) =>
+      deal.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      deal.customer.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  }, [pipelineStages, searchTerm]);
+
+  const handleAddDeal = (stageId: string) => {
+    // Navigate to new deal form with pre-filled stage
+    router.push(`/pipeline/deals/new?stage=${stageId}`);
+  };
+
+  const handleMoveDeal = async (dealId: string, fromStage: string, toStage: string) => {
+    try {
+      // Update deal in database
+      const dealToMove = deals.find(d => d.id === dealId);
+      if (!dealToMove) return;
+
+      const updatedDeal = { ...dealToMove, stage: toStage };
+      
+      const response = await fetch(`/api/deals/${dealId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(updatedDeal),
+      });
+
+      if (response.ok) {
+        // Update local state
+        setDeals(prev => prev.map(d => d.id === dealId ? updatedDeal : d));
+        
+        // Update pipeline stages
+        setPipelineStages(prev => prev.map(stage => {
+          if (stage.id === fromStage) {
+            return {
+              ...stage,
+              deals: stage.deals.filter(deal => deal.id !== dealId)
+            };
+          }
+          if (stage.id === toStage) {
+            const transformedDeal = {
+              id: updatedDeal.id,
+              title: updatedDeal.title,
+              customer: updatedDeal.customer || 'Unknown Customer',
+              value: updatedDeal.value,
+              stage: updatedDeal.stage,
+              probability: updatedDeal.probability,
+              createdDate: updatedDeal.createdDate,
+              priority: updatedDeal.priority,
+              expectedCloseDate: updatedDeal.expectedCloseDate,
+              source: updatedDeal.source,
+              notes: updatedDeal.notes
+            };
+            return {
+              ...stage,
+              deals: [...stage.deals, transformedDeal]
+            };
+          }
+          return stage;
+        }));
+        
+        setToast({ message: 'Deal moved successfully', type: 'success' });
+      } else {
+        setToast({ message: 'Failed to move deal', type: 'error' });
+      }
+    } catch {
+      setToast({ message: 'Failed to move deal', type: 'error' });
+    }
+  };
+
+  const handleDeleteDeal = async (dealId: string) => {
+    try {
+      const response = await fetch(`/api/deals/${dealId}`, {
+        method: 'DELETE',
+      });
+
+      if (response.ok) {
+        // Update local state
+        setDeals(prev => prev.filter(d => d.id !== dealId));
+        setPipelineStages(prev => prev.map(stage => ({
+          ...stage,
+          deals: stage.deals.filter(deal => deal.id !== dealId)
+        })));
+        setToast({ message: 'Deal deleted successfully', type: 'success' });
+      } else {
+        setToast({ message: 'Failed to delete deal', type: 'error' });
+      }
+    } catch {
+      setToast({ message: 'Failed to delete deal', type: 'error' });
+    }
+  };
+
+  // Table configuration for deals
+  const tableColumns = [
+    { key: 'title', label: 'Deal Title', sortable: true },
+    { key: 'customer', label: 'Customer', sortable: true },
+    { key: 'stage', label: 'Stage', sortable: false },
+    { key: 'value', label: 'Value', sortable: true },
+    { key: 'probability', label: 'Probability', sortable: true },
+    { key: 'expectedValue', label: 'Expected Value', sortable: true },
+    { key: 'createdDate', label: 'Created', sortable: true },
+    { key: 'actions', label: 'Actions', sortable: false }
+  ];
+
+  const tableData = filteredDeals.map((deal: DealData & { stageName: string }) => ({
+    title: deal.title,
+    customer: deal.customer,
+    stage: (
+      <span className={`px-2 py-1 rounded-full text-xs font-medium text-white ${pipelineStages.find(s => s.id === deal.stage)?.color}`}>
+        {deal.stageName}
+      </span>
+    ),
+    value: formatCurrency(deal.value),
+    probability: `${deal.probability}%`,
+    expectedValue: formatCurrency(deal.value * deal.probability / 100),
+    createdDate: new Date(deal.createdDate).toLocaleDateString(),
+    actions: (
+      <div className="flex items-center gap-2">
+        <Button variant="ghost" size="sm" onClick={() => router.push(`/pipeline/deals/${deal.id}`)}>
+          <EyeIcon className="h-4 w-4" />
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => router.push(`/pipeline/deals/${deal.id}/edit`)}>
+          <PencilIcon className="h-4 w-4" />
+        </Button>
+        <Button 
+          variant="ghost" 
+          size="sm" 
+          onClick={() => handleDeleteDeal(deal.id)}
+          className="text-red-600 hover:text-red-700"
+        >
+          <TrashIcon className="h-4 w-4" />
+        </Button>
+      </div>
+    )
+  }));
+
+  if (loading) {
+    return (
+      <AppLayout>
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 mx-auto mb-4" style={{ borderColor: 'var(--accent)' }}></div>
+            <p style={{ color: 'var(--muted-foreground)' }}>Loading pipeline...</p>
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  return (
+    <AppLayout>
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold" style={{ color: 'var(--foreground)' }}>
+              Sales Pipeline
+            </h1>
+            <p className="text-sm" style={{ color: 'var(--muted-foreground)' }}>
+              Track and manage your sales opportunities
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
+              <Button
+                variant={viewMode === 'pipeline' ? 'default' : 'ghost'}
+                size="sm"
+                onClick={() => setViewMode('pipeline')}
+                className="px-3"
+              >
+                <ChartBarIcon className="h-4 w-4 mr-1" />
+                Pipeline
+              </Button>
+              <Button
+                variant={viewMode === 'table' ? 'default' : 'ghost'}
+                size="sm"
+                onClick={() => setViewMode('table')}
+                className="px-3"
+              >
+                Table
+              </Button>
+            </div>
+            <Button onClick={() => router.push('/pipeline/deals/new')} className="flex items-center gap-2">
+              <PlusIcon className="h-4 w-4" />
+              New Deal
+            </Button>
+          </div>
+        </div>
+
+        {/* KPI Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+          <KPICard 
+            title="Total Pipeline Value" 
+            value={formatCurrency(stats.totalValue)}
+            icon={<CurrencyDollarIcon className="h-6 w-6" style={{ color: 'var(--accent)' }} />}
+          />
+          <KPICard 
+            title="Expected Value" 
+            value={formatCurrency(stats.weightedValue)}
+            icon={<ChartBarIcon className="h-6 w-6 text-blue-500" />}
+          />
+          <KPICard 
+            title="Closed Won" 
+            value={stats.closedWonDeals.toString()}
+            icon={<CheckCircleIcon className="h-6 w-6 text-green-500" />}
+          />
+          <KPICard 
+            title="Active Deals" 
+            value={stats.totalDeals.toString()}
+            icon={<UserGroupIcon className="h-6 w-6 text-purple-500" />}
+          />
+        </div>
+
+        {/* Pipeline View */}
+        {viewMode === 'pipeline' ? (
+          <div className="bg-white dark:bg-gray-800 rounded-lg border p-6" style={{ borderColor: 'var(--border)' }}>
+            <SalesPipeline
+              stages={pipelineStages}
+              onAddDeal={handleAddDeal}
+              onMoveDeal={handleMoveDeal}
+              className="w-full"
+            />
+          </div>
+        ) : (
+          /* Table View */
+          <div className="space-y-4">
+            {/* Search */}
+            <div className="flex items-center gap-4">
+              <div className="flex-1">
+                <div className="relative">
+                  <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4" style={{ color: 'var(--muted-foreground)' }} />
+                  <Input
+                    placeholder="Search deals by title or customer..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-10"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Results Summary */}
+            <div className="flex items-center justify-between text-sm" style={{ color: 'var(--muted-foreground)' }}>
+              <span>
+                Showing {filteredDeals.length} deals
+                {searchTerm && ` matching "${searchTerm}"`}
+              </span>
+            </div>
+
+            {/* Deals Table */}
+            <PaginatedTableCard 
+              title="All Deals"
+              columns={tableColumns}
+              data={tableData}
+              itemsPerPage={10}
+              headerActions={
+                searchTerm && (
+                  <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full">
+                    &quot;{searchTerm}&quot;
+                  </span>
+                )
+              }
+            />
+          </div>
+        )}
+
+        {/* Toast Notifications */}
+        {toast && (
+          <Toast
+            title={toast.message}
+            variant={toast.type}
+            onClose={() => setToast(null)}
+          >
+            {toast.message}
+          </Toast>
+        )}
+      </div>
+    </AppLayout>
+  );
+}

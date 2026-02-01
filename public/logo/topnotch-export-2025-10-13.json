@@ -1,0 +1,29 @@
+{
+  "customers": [],
+  "products": [
+    {
+      "id": "2d0mmf7iwbumgp36i04",
+      "name": "Iphone 15 Pro Max",
+      "description": "512GB Orange",
+      "price": 35000,
+      "cost": 24000,
+      "sku": "",
+      "category": "Iphones",
+      "stock": 20,
+      "minStock": 10,
+      "createdAt": "2025-10-13T12:05:24.004Z",
+      "updatedAt": "2025-10-13T12:05:24.004Z"
+    }
+  ],
+  "sales": [],
+  "invoices": [],
+  "settings": {
+    "companyName": "EKHLAS SOLAR AND ELECTRICAL INSTALLATIONS COMPANY S/L LTD",
+    "address": "",
+    "phone": "",
+    "email": "",
+    "taxRate": 0.15,
+    "currency": "NLE"
+  },
+  "exportedAt": "2025-10-13T12:09:42.918Z"
+}
