@@ -38,6 +38,7 @@ function createTables(db) {
       price REAL NOT NULL CHECK (price > 0),
       cost REAL CHECK (cost IS NULL OR cost >= 0),
       sku TEXT,
+      brand TEXT,
       category TEXT,
       stock INTEGER NOT NULL DEFAULT 0 CHECK (stock >= 0),
       min_stock INTEGER CHECK (min_stock >= 0),
@@ -490,6 +491,17 @@ function migrateDatabase(db) {
     }
   }
   
+  // Add brand column to products
+  try {
+    db.exec(`ALTER TABLE products ADD COLUMN brand TEXT`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_products_brand ON products(brand)`);
+    console.log('✅ Added brand column to products');
+  } catch (error) {
+    if (!error.message.includes('duplicate column name')) {
+      console.log('Brand migration note:', error.message);
+    }
+  }
+
   // Add backorder support to sales table
   try {
     db.exec(`ALTER TABLE sales ADD COLUMN has_backorder INTEGER DEFAULT 0`);

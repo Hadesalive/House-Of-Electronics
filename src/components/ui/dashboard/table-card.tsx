@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { ReactNode, useState } from "react";
+import { ReactNode, useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { ChevronLeftIcon, ChevronRightIcon, ChevronUpIcon, ChevronDownIcon } from "@heroicons/react/24/outline";
 import { EmptyState, LoadingState } from "./empty-state";
@@ -47,6 +47,9 @@ export function PaginatedTableCard({
   const [currentPage, setCurrentPage] = useState(1);
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+
+  // Reset to page 1 when data changes (search/filter)
+  useEffect(() => { setCurrentPage(1); }, [data.length]);
 
   // Sort data based on current sort settings
   const sortedData = [...data].sort((a, b) => {
@@ -176,52 +179,72 @@ export function PaginatedTableCard({
       
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between px-4 py-2.5" style={{ borderTop: '1px solid var(--border)' }}>
+        <div className="flex items-center justify-between px-4 py-2.5 flex-wrap gap-2" style={{ borderTop: '1px solid var(--border)' }}>
           <div className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
-            Showing {startIndex + 1} to {Math.min(endIndex, sortedData.length)} of {sortedData.length} results
+            Showing {startIndex + 1}–{Math.min(endIndex, sortedData.length)} of {sortedData.length}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
+            {/* Prev */}
             <button
               onClick={() => goToPage(currentPage - 1)}
               disabled={currentPage === 1}
-              className="p-1 rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
-              style={{ 
-                color: 'var(--foreground)',
-                border: '1px solid var(--border)'
-              }}
+              className="p-1 rounded-md disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[var(--muted)] transition-colors"
+              style={{ color: 'var(--foreground)', border: '1px solid var(--border)' }}
             >
               <ChevronLeftIcon className="h-4 w-4" />
             </button>
-            
-            <div className="flex items-center gap-1">
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
-                <button
-                  key={page}
-                  onClick={() => goToPage(page)}
-                  className={`px-2 py-1 text-xs rounded-md transition-colors ${
-                    currentPage === page 
-                      ? '' 
-                      : 'hover:bg-[var(--muted)]'
-                  }`}
-                  style={{
-                    backgroundColor: currentPage === page ? 'var(--accent)' : 'transparent',
-                    color: currentPage === page ? 'var(--accent-contrast)' : 'var(--foreground)',
-                    border: '1px solid var(--border)'
-                  }}
-                >
-                  {page}
-                </button>
-              ))}
-            </div>
-            
+
+            {/* Windowed page buttons */}
+            {(() => {
+              const pages: (number | 'ellipsis-start' | 'ellipsis-end')[] = [];
+              const delta = 2;
+              const left = currentPage - delta;
+              const right = currentPage + delta;
+
+              // Always show page 1
+              pages.push(1);
+
+              if (left > 2) pages.push('ellipsis-start');
+
+              for (let i = Math.max(2, left); i <= Math.min(totalPages - 1, right); i++) {
+                pages.push(i);
+              }
+
+              if (right < totalPages - 1) pages.push('ellipsis-end');
+
+              // Always show last page
+              if (totalPages > 1) pages.push(totalPages);
+
+              return pages.map((page, idx) => {
+                if (page === 'ellipsis-start' || page === 'ellipsis-end') {
+                  return (
+                    <span key={page} className="px-1 text-xs" style={{ color: 'var(--muted-foreground)' }}>…</span>
+                  );
+                }
+                const isActive = currentPage === page;
+                return (
+                  <button
+                    key={`${page}-${idx}`}
+                    onClick={() => goToPage(page)}
+                    className="min-w-[28px] px-2 py-1 text-xs rounded-md transition-colors"
+                    style={{
+                      backgroundColor: isActive ? 'var(--accent)' : 'transparent',
+                      color: isActive ? 'white' : 'var(--foreground)',
+                      border: '1px solid var(--border)',
+                    }}
+                  >
+                    {page}
+                  </button>
+                );
+              });
+            })()}
+
+            {/* Next */}
             <button
               onClick={() => goToPage(currentPage + 1)}
               disabled={currentPage === totalPages}
-              className="p-1 rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
-              style={{ 
-                color: 'var(--foreground)',
-                border: '1px solid var(--border)'
-              }}
+              className="p-1 rounded-md disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[var(--muted)] transition-colors"
+              style={{ color: 'var(--foreground)', border: '1px solid var(--border)' }}
             >
               <ChevronRightIcon className="h-4 w-4" />
             </button>

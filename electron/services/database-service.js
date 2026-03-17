@@ -567,6 +567,7 @@ function createSQLiteDatabaseService() {
           price: row.price,
           cost: row.cost,
           sku: row.sku,
+          brand: row.brand || null,
           category: row.category,
           stock: row.stock,
           minStock: row.min_stock,
@@ -592,6 +593,7 @@ function createSQLiteDatabaseService() {
             price: row.price,
             cost: row.cost,
             sku: row.sku,
+            brand: row.brand || null,
             category: row.category,
             stock: row.stock,
             minStock: row.min_stock,
@@ -615,8 +617,8 @@ function createSQLiteDatabaseService() {
         const now = new Date().toISOString();
 
         const stmt = db.prepare(`
-          INSERT INTO products (id, name, description, price, cost, sku, category, stock, min_stock, is_active, image, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO products (id, name, description, price, cost, sku, brand, category, stock, min_stock, is_active, image, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
 
         stmt.run(
@@ -626,6 +628,7 @@ function createSQLiteDatabaseService() {
           productData.price || 0,
           (productData.cost !== undefined && productData.cost !== null) ? productData.cost : null,
           productData.sku || '',
+          productData.brand || null,
           productData.category || '',
           productData.stock || 0,
           productData.minStock || 0,

@@ -1,9 +1,14 @@
 -- ============================================
 -- Supabase Schema for House of Electronics
--- Complete schema matching local SQLite database
 -- ============================================
 
--- Customers table
+-- EXTENSIONS
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+-- ============================================
+-- TABLES
+-- ============================================
+
 CREATE TABLE IF NOT EXISTS customers (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -24,7 +29,6 @@ CREATE TABLE IF NOT EXISTS customers (
   store_credit REAL DEFAULT 0
 );
 
--- Products table
 CREATE TABLE IF NOT EXISTS products (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -32,6 +36,7 @@ CREATE TABLE IF NOT EXISTS products (
   price REAL NOT NULL CHECK (price > 0),
   cost REAL CHECK (cost IS NULL OR cost >= 0),
   sku TEXT,
+  brand TEXT,
   category TEXT,
   stock INTEGER NOT NULL DEFAULT 0 CHECK (stock >= 0),
   min_stock INTEGER CHECK (min_stock >= 0),
@@ -42,7 +47,6 @@ CREATE TABLE IF NOT EXISTS products (
   is_active INTEGER DEFAULT 1
 );
 
--- Sales table (with all columns including migrations)
 CREATE TABLE IF NOT EXISTS sales (
   id TEXT PRIMARY KEY,
   customer_id TEXT,
@@ -68,7 +72,6 @@ CREATE TABLE IF NOT EXISTS sales (
   cashier_employee_id TEXT
 );
 
--- Invoices table (with all columns including migrations)
 CREATE TABLE IF NOT EXISTS invoices (
   id TEXT PRIMARY KEY,
   number TEXT NOT NULL UNIQUE,
@@ -100,7 +103,6 @@ CREATE TABLE IF NOT EXISTS invoices (
   sales_rep_id TEXT
 );
 
--- Orders table
 CREATE TABLE IF NOT EXISTS orders (
   id TEXT PRIMARY KEY,
   order_number TEXT NOT NULL UNIQUE,
@@ -123,7 +125,6 @@ CREATE TABLE IF NOT EXISTS orders (
   deleted_at TIMESTAMP
 );
 
--- Returns table
 CREATE TABLE IF NOT EXISTS returns (
   id TEXT PRIMARY KEY,
   return_number TEXT NOT NULL UNIQUE,
@@ -144,7 +145,6 @@ CREATE TABLE IF NOT EXISTS returns (
   deleted_at TIMESTAMP
 );
 
--- Deals table
 CREATE TABLE IF NOT EXISTS deals (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
@@ -167,7 +167,6 @@ CREATE TABLE IF NOT EXISTS deals (
   deleted_at TIMESTAMP
 );
 
--- Debts table (NO updated_at column - matches SQLite schema)
 CREATE TABLE IF NOT EXISTS debts (
   id TEXT PRIMARY KEY,
   customer_id TEXT,
@@ -181,7 +180,6 @@ CREATE TABLE IF NOT EXISTS debts (
   sale_id TEXT
 );
 
--- Debt Payments table (NO updated_at column - matches SQLite schema)
 CREATE TABLE IF NOT EXISTS debt_payments (
   id TEXT PRIMARY KEY,
   debt_id TEXT REFERENCES debts(id) ON DELETE CASCADE,
@@ -191,7 +189,6 @@ CREATE TABLE IF NOT EXISTS debt_payments (
   method TEXT
 );
 
--- Invoice Templates table
 CREATE TABLE IF NOT EXISTS invoice_templates (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -216,7 +213,6 @@ CREATE TABLE IF NOT EXISTS invoice_templates (
   updated_at TIMESTAMP DEFAULT NOW()
 );
 
--- BOQs table
 CREATE TABLE IF NOT EXISTS boqs (
   id TEXT PRIMARY KEY,
   boq_number TEXT NOT NULL,
@@ -237,7 +233,6 @@ CREATE TABLE IF NOT EXISTS boqs (
   deleted_at TIMESTAMP
 );
 
--- Users table for RBAC (internal Electron app - password_hash synced)
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   username TEXT UNIQUE NOT NULL,
@@ -254,11 +249,20 @@ CREATE TABLE IF NOT EXISTS users (
   last_login TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS public.product_keys (
+  key_hash TEXT PRIMARY KEY,
+  status TEXT NOT NULL DEFAULT 'unused' CHECK (status IN ('unused', 'used')),
+  activated_at TIMESTAMPTZ,
+  machine_id TEXT,
+  machine_name TEXT,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- ============================================
--- Create Indexes for Performance
+-- INDEXES
 -- ============================================
 
--- Customers indexes
 CREATE INDEX IF NOT EXISTS idx_customers_updated_at ON customers(updated_at);
 CREATE INDEX IF NOT EXISTS idx_customers_deleted_at ON customers(deleted_at);
 CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(name);
@@ -267,17 +271,16 @@ CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);
 CREATE INDEX IF NOT EXISTS idx_customers_created_at ON customers(created_at);
 CREATE INDEX IF NOT EXISTS idx_customers_is_active ON customers(is_active);
 
--- Products indexes
 CREATE INDEX IF NOT EXISTS idx_products_updated_at ON products(updated_at);
 CREATE INDEX IF NOT EXISTS idx_products_deleted_at ON products(deleted_at);
 CREATE INDEX IF NOT EXISTS idx_products_name ON products(name);
 CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku);
+CREATE INDEX IF NOT EXISTS idx_products_brand ON products(brand);
 CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);
 CREATE INDEX IF NOT EXISTS idx_products_stock ON products(stock);
 CREATE INDEX IF NOT EXISTS idx_products_created_at ON products(created_at);
 CREATE INDEX IF NOT EXISTS idx_products_is_active ON products(is_active);
 
--- Sales indexes
 CREATE INDEX IF NOT EXISTS idx_sales_updated_at ON sales(updated_at);
 CREATE INDEX IF NOT EXISTS idx_sales_deleted_at ON sales(deleted_at);
 CREATE INDEX IF NOT EXISTS idx_sales_customer_id ON sales(customer_id);
@@ -287,7 +290,6 @@ CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales(created_at);
 CREATE INDEX IF NOT EXISTS idx_sales_total ON sales(total);
 CREATE INDEX IF NOT EXISTS idx_sales_user_id ON sales(user_id);
 
--- Invoices indexes
 CREATE INDEX IF NOT EXISTS idx_invoices_updated_at ON invoices(updated_at);
 CREATE INDEX IF NOT EXISTS idx_invoices_deleted_at ON invoices(deleted_at);
 CREATE INDEX IF NOT EXISTS idx_invoices_number ON invoices(number);
@@ -299,7 +301,6 @@ CREATE INDEX IF NOT EXISTS idx_invoices_due_date ON invoices(due_date);
 CREATE INDEX IF NOT EXISTS idx_invoices_sale_id ON invoices(sale_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_user_id ON invoices(user_id);
 
--- Orders indexes
 CREATE INDEX IF NOT EXISTS idx_orders_updated_at ON orders(updated_at);
 CREATE INDEX IF NOT EXISTS idx_orders_deleted_at ON orders(deleted_at);
 CREATE INDEX IF NOT EXISTS idx_orders_order_number ON orders(order_number);
@@ -309,7 +310,6 @@ CREATE INDEX IF NOT EXISTS idx_orders_payment_status ON orders(payment_status);
 CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at);
 CREATE INDEX IF NOT EXISTS idx_orders_expected_delivery_date ON orders(expected_delivery_date);
 
--- Returns indexes
 CREATE INDEX IF NOT EXISTS idx_returns_updated_at ON returns(updated_at);
 CREATE INDEX IF NOT EXISTS idx_returns_deleted_at ON returns(deleted_at);
 CREATE INDEX IF NOT EXISTS idx_returns_return_number ON returns(return_number);
@@ -319,7 +319,6 @@ CREATE INDEX IF NOT EXISTS idx_returns_status ON returns(status);
 CREATE INDEX IF NOT EXISTS idx_returns_refund_method ON returns(refund_method);
 CREATE INDEX IF NOT EXISTS idx_returns_created_at ON returns(created_at);
 
--- Deals indexes
 CREATE INDEX IF NOT EXISTS idx_deals_updated_at ON deals(updated_at);
 CREATE INDEX IF NOT EXISTS idx_deals_deleted_at ON deals(deleted_at);
 CREATE INDEX IF NOT EXISTS idx_deals_customer_id ON deals(customer_id);
@@ -329,31 +328,26 @@ CREATE INDEX IF NOT EXISTS idx_deals_created_at ON deals(created_at);
 CREATE INDEX IF NOT EXISTS idx_deals_expected_close_date ON deals(expected_close_date);
 CREATE INDEX IF NOT EXISTS idx_deals_value ON deals(value);
 
--- Debts indexes (no updated_at index since column doesn't exist)
 CREATE INDEX IF NOT EXISTS idx_debts_deleted_at ON debts(deleted_at);
 CREATE INDEX IF NOT EXISTS idx_debts_customer_id ON debts(customer_id);
 CREATE INDEX IF NOT EXISTS idx_debts_status ON debts(status);
 CREATE INDEX IF NOT EXISTS idx_debts_created_at ON debts(created_at);
 CREATE INDEX IF NOT EXISTS idx_debts_sale_id ON debts(sale_id);
 
--- Debt Payments indexes (no updated_at index since column doesn't exist)
 CREATE INDEX IF NOT EXISTS idx_debt_payments_deleted_at ON debt_payments(deleted_at);
 CREATE INDEX IF NOT EXISTS idx_debt_payments_debt_id ON debt_payments(debt_id);
 CREATE INDEX IF NOT EXISTS idx_debt_payments_date ON debt_payments(date);
 
--- Invoice Templates indexes
 CREATE INDEX IF NOT EXISTS idx_invoice_templates_updated_at ON invoice_templates(updated_at);
 CREATE INDEX IF NOT EXISTS idx_invoice_templates_name ON invoice_templates(name);
 CREATE INDEX IF NOT EXISTS idx_invoice_templates_created_at ON invoice_templates(created_at);
 
--- BOQs indexes
 CREATE INDEX IF NOT EXISTS idx_boqs_deleted_at ON boqs(deleted_at);
 CREATE INDEX IF NOT EXISTS idx_boqs_boq_number ON boqs(boq_number);
 CREATE INDEX IF NOT EXISTS idx_boqs_date ON boqs(date);
 CREATE INDEX IF NOT EXISTS idx_boqs_client_name ON boqs(client_name);
 CREATE INDEX IF NOT EXISTS idx_boqs_created_at ON boqs(created_at);
 
--- Users indexes
 CREATE INDEX IF NOT EXISTS idx_users_updated_at ON users(updated_at);
 CREATE INDEX IF NOT EXISTS idx_users_deleted_at ON users(deleted_at);
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
@@ -363,7 +357,6 @@ CREATE INDEX IF NOT EXISTS idx_users_employee_id ON users(employee_id);
 CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at);
 CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active);
 
--- Composite indexes for common query patterns
 CREATE INDEX IF NOT EXISTS idx_sales_customer_status ON sales(customer_id, status);
 CREATE INDEX IF NOT EXISTS idx_sales_created_status ON sales(created_at, status);
 CREATE INDEX IF NOT EXISTS idx_invoices_customer_status ON invoices(customer_id, status);
@@ -371,12 +364,12 @@ CREATE INDEX IF NOT EXISTS idx_orders_status_created ON orders(status, created_a
 CREATE INDEX IF NOT EXISTS idx_returns_status_created ON returns(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_deals_stage_priority ON deals(stage, priority);
 
+CREATE INDEX IF NOT EXISTS product_keys_status_idx ON public.product_keys(status);
+
 -- ============================================
--- Create Triggers to Auto-Update updated_at
--- Only for tables that have updated_at column
+-- TRIGGERS
 -- ============================================
 
--- Function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -385,52 +378,29 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
--- Triggers for tables WITH updated_at column
-CREATE TRIGGER update_customers_updated_at 
-    BEFORE UPDATE ON customers
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER update_products_updated_at 
-    BEFORE UPDATE ON products
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER update_sales_updated_at 
-    BEFORE UPDATE ON sales
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER update_invoices_updated_at 
-    BEFORE UPDATE ON invoices
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER update_orders_updated_at 
-    BEFORE UPDATE ON orders
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER update_returns_updated_at 
-    BEFORE UPDATE ON returns
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER update_deals_updated_at 
-    BEFORE UPDATE ON deals
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER update_invoice_templates_updated_at 
-    BEFORE UPDATE ON invoice_templates
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER update_users_updated_at 
-    BEFORE UPDATE ON users
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER update_boqs_updated_at 
-    BEFORE UPDATE ON boqs
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
--- NOTE: debts and debt_payments tables do NOT have updated_at columns
--- so no triggers are created for them
+CREATE TRIGGER update_customers_updated_at
+    BEFORE UPDATE ON customers FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_products_updated_at
+    BEFORE UPDATE ON products FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_sales_updated_at
+    BEFORE UPDATE ON sales FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_invoices_updated_at
+    BEFORE UPDATE ON invoices FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_orders_updated_at
+    BEFORE UPDATE ON orders FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_returns_updated_at
+    BEFORE UPDATE ON returns FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_deals_updated_at
+    BEFORE UPDATE ON deals FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_invoice_templates_updated_at
+    BEFORE UPDATE ON invoice_templates FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_users_updated_at
+    BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_boqs_updated_at
+    BEFORE UPDATE ON boqs FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================
--- Disable Row Level Security (for testing)
+-- ROW LEVEL SECURITY
 -- ============================================
 
 ALTER TABLE customers DISABLE ROW LEVEL SECURITY;
@@ -446,6 +416,98 @@ ALTER TABLE invoice_templates DISABLE ROW LEVEL SECURITY;
 ALTER TABLE boqs DISABLE ROW LEVEL SECURITY;
 ALTER TABLE users DISABLE ROW LEVEL SECURITY;
 
+ALTER TABLE public.product_keys ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'product_keys' AND policyname = 'service_access'
+  ) THEN
+    CREATE POLICY service_access ON public.product_keys
+      FOR ALL
+      USING (auth.role() = 'service_role')
+      WITH CHECK (auth.role() = 'service_role');
+  END IF;
+END $$;
+
 -- ============================================
--- Schema Complete!
+-- MOBILE AUTH FUNCTIONS
 -- ============================================
+
+CREATE OR REPLACE FUNCTION mobile_user_login(p_username TEXT, p_password TEXT)
+RETURNS JSON LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  v_user RECORD;
+  v_password_hash TEXT;
+  v_result JSON;
+BEGIN
+  v_password_hash := encode(digest(p_password, 'sha256'), 'hex');
+  SELECT * INTO v_user FROM users WHERE username = p_username AND is_active = 1 AND deleted_at IS NULL;
+  IF v_user IS NULL THEN
+    RETURN json_build_object('success', false, 'error', 'Invalid username or password');
+  END IF;
+  IF v_user.password_hash != v_password_hash THEN
+    RETURN json_build_object('success', false, 'error', 'Invalid username or password');
+  END IF;
+  UPDATE users SET last_login = NOW() WHERE id = v_user.id;
+  v_result := json_build_object('success', true, 'data', json_build_object(
+    'id', v_user.id, 'username', v_user.username, 'fullName', v_user.full_name,
+    'email', v_user.email, 'phone', v_user.phone, 'role', v_user.role,
+    'employeeId', v_user.employee_id, 'isActive', v_user.is_active = 1,
+    'createdAt', v_user.created_at, 'updatedAt', v_user.updated_at, 'lastLogin', NOW()
+  ));
+  RETURN v_result;
+EXCEPTION WHEN OTHERS THEN
+  RETURN json_build_object('success', false, 'error', 'An error occurred during authentication');
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION mobile_change_password(p_user_id TEXT, p_current_password TEXT, p_new_password TEXT)
+RETURNS JSON LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  v_user RECORD;
+  v_current_hash TEXT;
+  v_new_hash TEXT;
+BEGIN
+  v_current_hash := encode(digest(p_current_password, 'sha256'), 'hex');
+  v_new_hash := encode(digest(p_new_password, 'sha256'), 'hex');
+  SELECT * INTO v_user FROM users WHERE id = p_user_id AND is_active = 1 AND deleted_at IS NULL;
+  IF v_user IS NULL THEN
+    RETURN json_build_object('success', false, 'error', 'User not found');
+  END IF;
+  IF v_user.password_hash != v_current_hash THEN
+    RETURN json_build_object('success', false, 'error', 'Current password is incorrect');
+  END IF;
+  UPDATE users SET password_hash = v_new_hash, updated_at = NOW() WHERE id = p_user_id;
+  RETURN json_build_object('success', true, 'message', 'Password changed successfully');
+EXCEPTION WHEN OTHERS THEN
+  RETURN json_build_object('success', false, 'error', 'An error occurred while changing password');
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION mobile_get_user(p_user_id TEXT)
+RETURNS JSON LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  v_user RECORD;
+BEGIN
+  SELECT * INTO v_user FROM users WHERE id = p_user_id AND is_active = 1 AND deleted_at IS NULL;
+  IF v_user IS NULL THEN
+    RETURN json_build_object('success', false, 'error', 'User not found');
+  END IF;
+  RETURN json_build_object('success', true, 'data', json_build_object(
+    'id', v_user.id, 'username', v_user.username, 'fullName', v_user.full_name,
+    'email', v_user.email, 'phone', v_user.phone, 'role', v_user.role,
+    'employeeId', v_user.employee_id, 'isActive', v_user.is_active = 1,
+    'createdAt', v_user.created_at, 'updatedAt', v_user.updated_at, 'lastLogin', v_user.last_login
+  ));
+EXCEPTION WHEN OTHERS THEN
+  RETURN json_build_object('success', false, 'error', 'An error occurred');
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION mobile_user_login(TEXT, TEXT) TO anon;
+GRANT EXECUTE ON FUNCTION mobile_user_login(TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION mobile_change_password(TEXT, TEXT, TEXT) TO anon;
+GRANT EXECUTE ON FUNCTION mobile_change_password(TEXT, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION mobile_get_user(TEXT) TO anon;
+GRANT EXECUTE ON FUNCTION mobile_get_user(TEXT) TO authenticated;

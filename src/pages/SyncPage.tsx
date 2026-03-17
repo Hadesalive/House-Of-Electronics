@@ -6,6 +6,7 @@ import { syncService } from '@/lib/services/sync.service';
 import { Button, Toast } from '@/components/ui/core';
 import { Select } from '@/components/ui/forms';
 import { KPICard, PaginatedTableCard } from '@/components/ui/dashboard';
+import { Switch } from '@/components/ui/forms';
 import {
   IconRefresh,
   IconCloudUpload,
@@ -18,7 +19,9 @@ import {
   IconRotateClockwise,
   IconDatabase,
   IconAlertTriangle,
-  IconInfoCircle
+  IconInfoCircle,
+  IconSettings,
+  IconLoader2
 } from '@tabler/icons-react';
 
 interface QueueItem {
@@ -35,18 +38,22 @@ interface QueueItem {
 }
 
 export default function SyncPage() {
-  const { 
-    status, 
+  const {
+    status,
     config,
     health,
     connectionStatus,
     syncing,
-    syncAll, 
-    pullChanges, 
+    loading: syncLoading,
+    syncAll,
+    pullChanges,
     refreshStatus,
     refreshHealth,
     resetFailed,
-    clearQueue
+    clearQueue,
+    setEnabled,
+    checkConnectionStatus,
+    updateConfig,
   } = useSync();
 
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
@@ -54,7 +61,9 @@ export default function SyncPage() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
-  const [activeTab, setActiveTab] = useState<'queue' | 'incoming' | 'conflicts'>('queue');
+  const [activeTab, setActiveTab] = useState<'queue' | 'incoming' | 'conflicts' | 'settings'>('queue');
+  const [checkingConnection, setCheckingConnection] = useState(false);
+  const [intervalSeconds, setIntervalSeconds] = useState<number | ''>('');
 
   const loadQueueItems = useCallback(async (silent = false) => {
     try {
@@ -464,7 +473,8 @@ export default function SyncPage() {
         {[
           { id: 'queue', label: 'Queue' },
           { id: 'incoming', label: 'Incoming' },
-          { id: 'conflicts', label: 'Conflicts' }
+          { id: 'conflicts', label: 'Conflicts' },
+          { id: 'settings', label: 'Settings' }
         ].map(tab => (
           <button
             key={tab.id}
@@ -621,6 +631,117 @@ export default function SyncPage() {
             emptyTitle="No conflicts"
             emptyDescription="No failed sync items"
           />
+        </div>
+      )}
+
+      {/* Settings Tab */}
+      {activeTab === 'settings' && (
+        <div className="max-w-md space-y-4">
+          {/* Enable / Disable */}
+          <div className="flex items-center justify-between p-4 rounded-lg border" style={{ backgroundColor: 'var(--card)', borderColor: 'var(--border)' }}>
+            <div>
+              <div className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>Cloud Sync</div>
+              <div className="text-xs mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
+                {config?.sync_enabled ? `Auto-syncs every ${config.sync_interval_minutes ?? 5} minutes` : 'Sync is disabled'}
+              </div>
+            </div>
+            <Switch
+              checked={!!config?.sync_enabled}
+              onChange={async (e) => {
+                try {
+                  await setEnabled(e.target.checked);
+                  setToast({ message: e.target.checked ? 'Sync enabled' : 'Sync disabled', type: 'success' });
+                } catch {
+                  setToast({ message: 'Failed to update sync status', type: 'error' });
+                }
+              }}
+              disabled={syncLoading}
+            />
+          </div>
+
+          {/* Sync Interval */}
+          <div className="flex items-center justify-between p-4 rounded-lg border" style={{ backgroundColor: 'var(--card)', borderColor: 'var(--border)' }}>
+            <div>
+              <div className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>Sync Interval</div>
+              <div className="text-xs mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
+                Currently: {config ? Math.round(config.sync_interval_minutes * 60) : '—'}s
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min="10"
+                placeholder={config ? String(Math.round(config.sync_interval_minutes * 60)) : '300'}
+                value={intervalSeconds}
+                onChange={(e) => setIntervalSeconds(e.target.value === '' ? '' : Number(e.target.value))}
+                className="w-20 px-2 py-1 text-sm rounded border text-right"
+                style={{ backgroundColor: 'var(--input)', borderColor: 'var(--border)', color: 'var(--foreground)' }}
+              />
+              <span className="text-xs" style={{ color: 'var(--muted-foreground)' }}>sec</span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  if (!intervalSeconds || Number(intervalSeconds) < 10) return;
+                  try {
+                    await updateConfig({ sync_interval_minutes: Number(intervalSeconds) / 60 });
+                    setToast({ message: `Interval set to ${intervalSeconds}s`, type: 'success' });
+                    setIntervalSeconds('');
+                  } catch {
+                    setToast({ message: 'Failed to update interval', type: 'error' });
+                  }
+                }}
+                disabled={!intervalSeconds || Number(intervalSeconds) < 10}
+              >
+                Save
+              </Button>
+            </div>
+          </div>
+
+          {/* Connection Status */}
+          <div className="p-4 rounded-lg border" style={{ backgroundColor: 'var(--card)', borderColor: 'var(--border)' }}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className={`h-2.5 w-2.5 rounded-full flex-shrink-0 ${
+                  connectionStatus.connected === true
+                    ? 'bg-green-500'
+                    : connectionStatus.connected === false
+                      ? 'bg-red-500'
+                      : 'bg-yellow-500 animate-pulse'
+                }`} />
+                <div>
+                  <div className="text-sm font-medium" style={{ color: 'var(--foreground)' }}>
+                    {connectionStatus.connected === true ? 'Connected' : connectionStatus.connected === false ? 'Not connected' : 'Checking…'}
+                  </div>
+                  {connectionStatus.message && (
+                    <div className="text-xs mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
+                      {connectionStatus.message}
+                    </div>
+                  )}
+                  {connectionStatus.lastChecked && (
+                    <div className="text-xs mt-0.5" style={{ color: 'var(--muted-foreground)' }}>
+                      Last checked: {new Date(connectionStatus.lastChecked).toLocaleTimeString()}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  setCheckingConnection(true);
+                  try { await checkConnectionStatus(); } finally { setCheckingConnection(false); }
+                }}
+                disabled={checkingConnection}
+                className="flex items-center gap-1.5"
+              >
+                {checkingConnection
+                  ? <IconLoader2 className="w-3.5 h-3.5 animate-spin" />
+                  : <IconRefresh className="w-3.5 h-3.5" />}
+                {checkingConnection ? 'Checking…' : 'Check'}
+              </Button>
+            </div>
+          </div>
         </div>
       )}
 

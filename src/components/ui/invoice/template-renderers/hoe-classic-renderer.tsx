@@ -94,6 +94,36 @@ const formatCurrency = (amount: number, currency?: string) => {
   return `${symbol}${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
+const currencyNames: Record<string, string> = {
+  NLe: 'Leones', USD: 'Dollars', EUR: 'Euros', GBP: 'Pounds', CAD: 'Dollars', AUD: 'Dollars',
+};
+
+const amountToWords = (amount: number, currency?: string): string => {
+  const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine',
+    'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+  const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
+  const toWords = (n: number): string => {
+    if (n === 0) return '';
+    if (n < 20) return ones[n];
+    if (n < 100) return tens[Math.floor(n / 10)] + (n % 10 ? ' ' + ones[n % 10] : '');
+    if (n < 1_000) return ones[Math.floor(n / 100)] + ' Hundred' + (n % 100 ? ' ' + toWords(n % 100) : '');
+    if (n < 1_000_000) return toWords(Math.floor(n / 1000)) + ' Thousand' + (n % 1000 ? ' ' + toWords(n % 1000) : '');
+    if (n < 1_000_000_000) return toWords(Math.floor(n / 1_000_000)) + ' Million' + (n % 1_000_000 ? ' ' + toWords(n % 1_000_000) : '');
+    return toWords(Math.floor(n / 1_000_000_000)) + ' Billion' + (n % 1_000_000_000 ? ' ' + toWords(n % 1_000_000_000) : '');
+  };
+
+  const normalized = normalizeCurrency(currency);
+  const currencyLabel = currencyNames[normalized] || normalized;
+  const intPart = Math.floor(amount);
+  const cents = Math.round((amount - intPart) * 100);
+  const intWords = intPart === 0 ? 'Zero' : toWords(intPart);
+
+  return cents > 0
+    ? `${intWords} ${currencyLabel} and ${toWords(cents)} Cents`
+    : `${intWords} ${currencyLabel} Only`;
+};
+
 const printStyles = `
   @media print {
     @page { 
@@ -180,31 +210,32 @@ export function HoeClassicRenderer({ data, template, brandLogos = [] }: Template
   const discountAmount = subtotal * (data.discount / 100);
   const taxableAmount = subtotal - discountAmount;
   
-  // Support multiple taxes (like classic renderer) or fall back to single taxRate
-  // If taxes array exists (even if empty), use it - empty array means taxes are disabled
-  // Only fall back to taxRate if taxes array is not defined
-  let calculatedTaxes: Array<{ id: string; name: string; rate: number; amount: number }> = [];
-  
-  if (data.taxes !== undefined && data.taxes !== null) {
-    // Taxes array is explicitly set - use it (respect empty array as "no taxes")
-    if (data.taxes.length > 0) {
-      calculatedTaxes = data.taxes
-        .filter(tax => tax.rate > 0) // Only include taxes with rate > 0
-        .map(tax => ({
-          ...tax,
-          amount: Math.round((taxableAmount * tax.rate) / 100 * 100) / 100
-        }));
-    }
-    // If taxes array is empty, calculatedTaxes remains empty (taxes disabled)
-  } else if (data.taxRate && data.taxRate > 0) {
-    // Fall back to taxRate only if taxes array is not defined
-    calculatedTaxes = [{
-      id: 'default-tax',
-      name: currency === 'USD' ? 'GST' : 'Tax',
-      rate: data.taxRate,
-      amount: Math.round((taxableAmount * data.taxRate) / 100 * 100) / 100
-    }];
-  }
+  // Tax calculation: use taxes array if it has entries with rate > 0,
+  // otherwise fall back to taxRate as a GST line.
+  // GST always shown by default at 15%. Uses configured taxes array if available,
+  // then taxRate, then falls back to the default 15% rate.
+  const DEFAULT_GST_RATE = 15;
+
+  const taxesFromArray = (data.taxes ?? [])
+    .filter(tax => tax.rate > 0)
+    .map(tax => ({
+      ...tax,
+      amount: Math.round((taxableAmount * tax.rate) / 100 * 100) / 100
+    }));
+
+  const gstRate = taxesFromArray.length > 0 ? null
+    : (data.taxRate && data.taxRate > 0) ? data.taxRate
+    : DEFAULT_GST_RATE;
+
+  const calculatedTaxes: Array<{ id: string; name: string; rate: number; amount: number }> =
+    taxesFromArray.length > 0
+      ? taxesFromArray
+      : [{
+          id: 'gst',
+          name: 'GST',
+          rate: gstRate!,
+          amount: Math.round((taxableAmount * gstRate!) / 100 * 100) / 100
+        }];
   
   const totalTaxAmount = Math.round(calculatedTaxes.reduce((sum, tax) => sum + tax.amount, 0) * 100) / 100;
   const total = taxableAmount + totalTaxAmount;
@@ -236,54 +267,96 @@ export function HoeClassicRenderer({ data, template, brandLogos = [] }: Template
   const isQuote = (data.invoiceType as string) === 'quote' || (data.invoiceType as string) === 'proforma';
 
   // ============================================================================
-  // FIXED PAGINATION: Same page layout on every page, only items table changes
+  // DYNAMIC PAGINATION: Height-estimation based bin packing (mm units)
   // ============================================================================
-  // Every page has: Header + Items Table + Totals + Footer
-  // Only the items in the table changes between pages
-  
-  // Calculate items per page based on actual available space
-  // A4 page: 277mm available height (297mm - 20mm padding)
-  // Item row height: ~12mm average
-  
-  // Regular invoices:
-  // - Header: ~85mm, Recipient: ~35mm, Table header: ~8mm, Totals: ~40mm, Footer: ~30mm
-  // - Used: ~198mm, Available: 277mm - 198mm = ~79mm → ~6-7 items
-  // - Conservative: 10 items per page (allows for variation)
-  
-  // Delivery notes (signature only on last page):
-  // - Regular pages: Header: ~85mm, Recipient: ~35mm, Table header: ~8mm, Footer: ~30mm
-  // - Used: ~158mm, Available: 277mm - 158mm = ~119mm → ~10 items
-  // - Last page: Same + Signature: ~90mm, Used: ~248mm, Available: ~29mm → ~2-3 items
-  // - Use same as regular invoices: 10 items per page (signature only on last page)
-  
-  const ITEMS_PER_PAGE = 10; // Same for both - delivery notes only have signature on last page
-  
-  // Simple pagination: split items evenly across pages
-  const totalItems = data.items.length;
-  const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE);
-  
-  const adjustedPages: Array<{
-    pageNumber: number;
-    totalPages: number;
-    items: InvoiceItem[];
-    itemsRange: { start: number; end: number };
-  }> = [];
-  
-  for (let i = 0; i < totalPages; i++) {
-    const start = i * ITEMS_PER_PAGE;
-    const end = Math.min(start + ITEMS_PER_PAGE, totalItems);
-    adjustedPages.push({
-      pageNumber: i + 1,
-      totalPages,
-      items: data.items.slice(start, end),
-      itemsRange: { start: start + 1, end: end }
-    });
+  // Page: A4 297mm - 10mm top margin - 10mm bottom margin = 277mm outer height
+  // CSS padding: 10mm all sides → inner content height = 277 - 10 - 10 = 257mm
+  //
+  // Section heights (measured from rendered output, in mm):
+  //   Header (logo + company info + mb-5):              ~42mm
+  //   Recipient row (bill-to + sales rep + dates + mb-6): ~28mm
+  //   Table header row (py-2 th):                        ~8mm
+  //   Footer message (paddingTop 6mm + text + pb):       ~16mm
+  //   Footer with brand logos (+ pt-6 + logos + mb):    ~36mm
+  //   Totals block (subtotal + GST + total, last page):  ~22mm
+  //   Delivery confirmation section (last page):         ~38mm
+  //   Item row base (py-2, text-xs, single line):        ~7.5mm
+  //   Item row with itemDescription (+mt-1 text-[10px]):  +4.5mm extra
+
+  const PAGE_H = 257; // mm — inner content height
+
+  const SECTION_H = {
+    header:       42,
+    recipient:    28,
+    tableHead:     8,
+    footer:       16,
+    footerLogos:  36,
+    totals:       42,  // last page only: excl-GST + words + GST + total-with-GST + words
+    delivery:     38,  // last page only (delivery notes)
+    itemBase:    7.5,  // base row height
+    itemDesc:    4.5,  // extra when itemDescription is present
+  };
+
+  const getItemH = (item: InvoiceItem) =>
+    SECTION_H.itemBase + (item.itemDescription ? SECTION_H.itemDesc : 0);
+
+  const footerH = brandLogos.length > 0 ? SECTION_H.footerLogos : SECTION_H.footer;
+  const fixedOverhead = SECTION_H.header + SECTION_H.recipient + SECTION_H.tableHead + footerH;
+  const lastPageExtra = isDeliveryNote ? SECTION_H.delivery : SECTION_H.totals;
+
+  const baseAvail = PAGE_H - fixedOverhead;        // space for items on a regular page
+  const lastAvail = baseAvail - lastPageExtra;     // space for items on the last page
+
+  // Step 1 — greedy packing treating every page as a regular (non-last) page
+  const rawPages: InvoiceItem[][] = [];
+  let remaining = [...data.items];
+
+  while (remaining.length > 0) {
+    const page: InvoiceItem[] = [];
+    let used = 0;
+    for (const item of remaining) {
+      const h = getItemH(item);
+      if (used + h <= baseAvail) { page.push(item); used += h; }
+      else break;
+    }
+    if (page.length === 0) page.push(remaining[0]); // safety: always advance
+    rawPages.push(page);
+    remaining = remaining.slice(page.length);
   }
-  
-  console.log('HOE Classic - Fixed Pagination:', {
+
+  // Step 2 — shrink the last page until it fits with last-page extras
+  // Iterate in case the overflow page itself needs shrinking too
+  let safetyLimit = 20;
+  while (rawPages.length > 0 && safetyLimit-- > 0) {
+    const last = rawPages[rawPages.length - 1];
+    let lastUsed = last.reduce((s, item) => s + getItemH(item), 0);
+    if (lastUsed <= lastAvail) break; // fits — done
+
+    const overflow: InvoiceItem[] = [];
+    while (last.length > 1 && lastUsed > lastAvail) {
+      const item = last.pop()!;
+      overflow.unshift(item);
+      lastUsed -= getItemH(item);
+    }
+    if (overflow.length > 0) rawPages.push(overflow);
+    else break; // can't shrink further (single item remains)
+  }
+
+  // Step 3 — build final structure
+  let offset = 0;
+  const totalPages = rawPages.length;
+  const adjustedPages = rawPages.map((items, i) => {
+    const start = offset + 1;
+    const end   = offset + items.length;
+    offset = end;
+    return { pageNumber: i + 1, totalPages, items, itemsRange: { start, end } };
+  });
+
+  console.log('HOE Classic - Dynamic Pagination:', {
     type: isDeliveryNote ? 'Delivery Note' : 'Invoice',
-    totalItems,
-    itemsPerPage: ITEMS_PER_PAGE,
+    totalItems: data.items.length,
+    baseAvail: `${baseAvail.toFixed(1)}mm`,
+    lastAvail: `${lastAvail.toFixed(1)}mm`,
     totalPages,
     pages: adjustedPages.map(p => ({ page: p.pageNumber, items: p.items.length, range: p.itemsRange }))
   });
@@ -520,12 +593,12 @@ export function HoeClassicRenderer({ data, template, brandLogos = [] }: Template
 
             {/* Items table - on every page */}
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-              <div 
+              <div
                 className="items-table-wrapper"
-                style={{ 
-                  borderRadius: '8px', 
+                style={{
+                  borderRadius: '8px',
                   overflow: 'hidden',
-                  marginBottom: '10px'
+                  marginBottom: '0px'
                 }}
               >
                 <table
@@ -669,41 +742,62 @@ export function HoeClassicRenderer({ data, template, brandLogos = [] }: Template
       </table>
               </div>
 
-              {/* Totals - on every page (except delivery notes) */}
-              {!isDeliveryNote && (
-                <div 
-                  className="flex justify-end mb-6 invoice-totals" 
-                  style={{ 
-                    marginTop: 'auto',
-                    pageBreakInside: 'avoid',
-                    breakInside: 'avoid'
-                  }}
-                >
-                  <div className="text-sm space-y-1" style={{ minWidth: '200px' }}>
-                    <div className="flex justify-between" style={{ color: mutedText }}>
-            <span>Subtotal</span>
-            <span>{formatCurrency(subtotal, currency)}</span>
-          </div>
-                    {discountAmount > 0 && (
-                      <div className="flex justify-between" style={{ color: mutedText }}>
-                        <span>Discount</span>
+            </div>
+
+            {/* Totals - only on last page, at bottom (except delivery notes) */}
+            {!isDeliveryNote && isLastPage && (
+              <div
+                className="flex justify-end mt-auto mb-4 invoice-totals"
+                style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}
+              >
+                <div style={{ minWidth: '280px' }}>
+
+                  {/* Subtotal + discount rows — only shown when a discount applies */}
+                  {discountAmount > 0 && (
+                    <div className="space-y-1 pb-2 mb-2" style={{ borderBottom: `1px solid ${lineColor}` }}>
+                      <div className="flex justify-between text-sm" style={{ color: mutedText }}>
+                        <span>Subtotal</span>
+                        <span>{formatCurrency(subtotal, currency)}</span>
+                      </div>
+                      <div className="flex justify-between text-sm" style={{ color: mutedText }}>
+                        <span>Discount ({data.discount}%)</span>
                         <span>-{formatCurrency(discountAmount, currency)}</span>
                       </div>
-                    )}
-                    {calculatedTaxes.length > 0 && calculatedTaxes.map((tax) => (
-                      <div key={tax.id} className="flex justify-between" style={{ color: mutedText }}>
+                    </div>
+                  )}
+
+                  {/* — secondary rows: excl. GST + GST breakdown — */}
+                  <div className="space-y-1 mb-3">
+                    <div className="flex justify-between text-xs" style={{ color: mutedText }}>
+                      <span>Total excl. GST</span>
+                      <span>{formatCurrency(taxableAmount, currency)}</span>
+                    </div>
+                    <div
+                      className="text-right text-[10px] italic"
+                      style={{ color: mutedText, opacity: 0.7, lineHeight: '1.4' }}
+                    >
+                      {amountToWords(taxableAmount, currency)}
+                    </div>
+                    {calculatedTaxes.map((tax) => (
+                      <div key={tax.id} className="flex justify-between text-xs" style={{ color: mutedText }}>
                         <span>{tax.name} ({parseFloat(tax.rate.toFixed(2))}%)</span>
                         <span>{formatCurrency(tax.amount, currency)}</span>
                       </div>
                     ))}
-                    <div className="flex justify-between text-base font-bold pt-2" style={{ color: accent, borderTop: `1px solid ${lineColor}` }}>
-            <span>Total</span>
-            <span>{formatCurrency(total, currency)}</span>
-          </div>
-        </div>
-      </div>
-              )}
-            </div>
+                  </div>
+
+                  {/* — primary row: Total with GST — */}
+                  <div
+                    className="flex justify-between items-baseline pt-2"
+                    style={{ borderTop: `2px solid ${accent}` }}
+                  >
+                    <span className="text-sm font-bold" style={{ color: accent }}>Total with GST</span>
+                    <span className="text-lg font-bold" style={{ color: accent }}>{formatCurrency(total, currency)}</span>
+                  </div>
+
+                </div>
+              </div>
+            )}
 
             {/* Delivery Note Confirmation Section - only on last page for delivery notes */}
             {isDeliveryNote && isLastPage && (

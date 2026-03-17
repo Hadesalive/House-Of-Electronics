@@ -22,6 +22,7 @@ interface ProductFormData {
   description: string;
   price: number;
   cost?: number; // Optional cost
+  brand: string;
   category: string;
   stock: number;
   minStock: number;
@@ -41,6 +42,7 @@ export function ProductForm({
     description: '',
     price: 0,
     cost: undefined as any, // Allow undefined for optional cost
+    brand: '',
     category: '',
     stock: 0,
     minStock: 0,
@@ -49,18 +51,33 @@ export function ProductForm({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   
+  // Brand management
+  const [brands, setBrands] = useState<string[]>([]);
+  const [brandInput, setBrandInput] = useState('');
+  const [showBrandDropdown, setShowBrandDropdown] = useState(false);
+  const brandRef = useRef<HTMLDivElement>(null);
+
   // Category management
   const [categories, setCategories] = useState<string[]>([]);
   const [categoryInput, setCategoryInput] = useState('');
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
   const categoryRef = useRef<HTMLDivElement>(null);
 
-  // Load existing categories from products
+  // Load existing brands and categories from products
   useEffect(() => {
-    const loadCategories = async () => {
+    const loadOptions = async () => {
       try {
         const response = await productService.getAllProducts();
         if (response.success && response.data) {
+          const uniqueBrands = Array.from(
+            new Set(
+              response.data
+                .map(p => p.brand)
+                .filter((b): b is string => Boolean(b?.trim()))
+            )
+          ).sort();
+          setBrands(uniqueBrands);
+
           const uniqueCategories = Array.from(
             new Set(
               response.data
@@ -74,30 +91,37 @@ export function ProductForm({
         console.error('Failed to load categories:', error);
       }
     };
-    
+
     if (isOpen) {
-      loadCategories();
+      loadOptions();
     }
   }, [isOpen]);
 
-  // Update category input when formData.category changes
+  // Update brand/category inputs when formData changes
+  useEffect(() => {
+    setBrandInput(formData.brand || '');
+  }, [formData.brand]);
+
   useEffect(() => {
     setCategoryInput(formData.category || '');
   }, [formData.category]);
 
-  // Close dropdown when clicking outside
+  // Close dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
+      if (brandRef.current && !brandRef.current.contains(event.target as Node)) {
+        setShowBrandDropdown(false);
+      }
       if (categoryRef.current && !categoryRef.current.contains(event.target as Node)) {
         setShowCategoryDropdown(false);
       }
     };
 
-    if (showCategoryDropdown) {
+    if (showBrandDropdown || showCategoryDropdown) {
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
-  }, [showCategoryDropdown]);
+  }, [showBrandDropdown, showCategoryDropdown]);
 
   useEffect(() => {
     if (product) {
@@ -106,6 +130,7 @@ export function ProductForm({
         description: product.description || '',
         price: product.price || 0,
         cost: product.cost !== undefined && product.cost !== null ? product.cost : undefined as any,
+        brand: product.brand || '',
         category: product.category || '',
         stock: product.stock || 0,
         minStock: product.minStock || 0,
@@ -117,6 +142,7 @@ export function ProductForm({
         description: '',
         price: 0,
         cost: undefined as any,
+        brand: '',
         category: '',
         stock: 0,
         minStock: 0,
@@ -163,6 +189,7 @@ export function ProductForm({
         description: formData.description.trim() || undefined,
         price: formData.price,
         cost: formData.cost !== undefined && formData.cost !== null ? formData.cost : undefined,
+        brand: formData.brand.trim() || undefined,
         category: formData.category.trim() || undefined,
         stock: formData.stock,
         minStock: formData.minStock || undefined,
@@ -232,9 +259,86 @@ export function ProductForm({
                   rows={3}
                 />
 
+                {/* Brand field */}
                 <div className="space-y-2">
-                  <label 
-                    className="text-sm font-medium block" 
+                  <label className="text-sm font-medium block" style={{ color: 'var(--foreground)' }}>
+                    Brand (optional)
+                  </label>
+                  <div className="relative" ref={brandRef}>
+                    <div className="relative">
+                      <Input
+                        value={brandInput}
+                        onChange={(e) => {
+                          setBrandInput(e.target.value);
+                          handleInputChange('brand', e.target.value);
+                          setShowBrandDropdown(true);
+                        }}
+                        onFocus={() => setShowBrandDropdown(true)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            if (brandInput.trim()) {
+                              handleInputChange('brand', brandInput.trim());
+                              setShowBrandDropdown(false);
+                            }
+                          } else if (e.key === 'Escape') {
+                            setShowBrandDropdown(false);
+                          }
+                        }}
+                        placeholder="e.g. Apple, Samsung, TP-Link..."
+                      />
+                      {brandInput && (
+                        <button
+                          type="button"
+                          onClick={() => { setBrandInput(''); handleInputChange('brand', ''); setShowBrandDropdown(false); }}
+                          className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 rounded hover:bg-gray-100"
+                          style={{ color: 'var(--muted-foreground)' }}
+                        >
+                          <XMarkIcon className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                    {showBrandDropdown && (
+                      <div
+                        className="absolute z-50 w-full mt-1 rounded-lg shadow-lg border max-h-48 overflow-y-auto"
+                        style={{ backgroundColor: 'var(--card)', borderColor: 'var(--border)' }}
+                      >
+                        {brands.filter(b => b.toLowerCase().includes(brandInput.toLowerCase())).map(brand => (
+                          <button
+                            key={brand}
+                            type="button"
+                            onClick={() => { setBrandInput(brand); handleInputChange('brand', brand); setShowBrandDropdown(false); }}
+                            className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors flex items-center justify-between"
+                            style={{ color: 'var(--foreground)' }}
+                          >
+                            <span>{brand}</span>
+                            {brandInput === brand && <CheckIcon className="h-4 w-4" style={{ color: 'var(--accent)' }} />}
+                          </button>
+                        ))}
+                        {brandInput && !brands.some(b => b.toLowerCase() === brandInput.toLowerCase()) && (
+                          <button
+                            type="button"
+                            onClick={() => { handleInputChange('brand', brandInput.trim()); setShowBrandDropdown(false); }}
+                            className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors flex items-center gap-2 border-t"
+                            style={{ color: 'var(--accent)', borderColor: 'var(--border)' }}
+                          >
+                            <PlusIcon className="h-4 w-4" />
+                            <span>Use "{brandInput.trim()}"</span>
+                          </button>
+                        )}
+                        {brands.length === 0 && !brandInput && (
+                          <div className="px-4 py-3 text-sm text-center" style={{ color: 'var(--muted-foreground)' }}>
+                            No brands yet. Type to add one.
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label
+                    className="text-sm font-medium block"
                     style={{ color: 'var(--foreground)' }}
                   >
                     Category (optional)

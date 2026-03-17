@@ -155,6 +155,21 @@ function createSyncService(databaseService, cloudApiClient) {
     } catch (error) {
       console.error('Error creating locked_at index:', error);
     }
+
+    // Auto-populate credentials from env if not already set
+    try {
+      const envUrl = process.env.SUPABASE_URL || null;
+      const envKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || null;
+      if (envUrl && envKey) {
+        db.prepare(`
+          UPDATE sync_metadata
+          SET cloud_url = ?, api_key = ?, sync_enabled = 1
+          WHERE id = 1 AND (cloud_url IS NULL OR cloud_url = '')
+        `).run(envUrl, envKey);
+      }
+    } catch (error) {
+      console.error('Error auto-populating sync credentials:', error);
+    }
   }
 
   /**
@@ -191,14 +206,16 @@ function createSyncService(databaseService, cloudApiClient) {
     const config = stmt.get();
     
     if (!config) {
-      // Initialize default config
+      // Initialize default config with env credentials if available
       const deviceId = require('crypto').randomUUID();
+      const envUrl = process.env.SUPABASE_URL || null;
+      const envKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || null;
       const insertStmt = db.prepare(`
-        INSERT INTO sync_metadata 
-        (sync_enabled, device_id, last_sync_at) 
-        VALUES (0, ?, NULL)
+        INSERT INTO sync_metadata
+        (sync_enabled, device_id, last_sync_at, cloud_url, api_key)
+        VALUES (?, ?, NULL, ?, ?)
       `);
-      insertStmt.run(deviceId);
+      insertStmt.run(envUrl && envKey ? 1 : 0, deviceId, envUrl, envKey);
       return getSyncConfig();
     }
     

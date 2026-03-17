@@ -37,6 +37,7 @@ export default function ProductsPage() {
   
   // Search and filter states
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedBrand, setSelectedBrand] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [sortBy, setSortBy] = useState<'name' | 'price' | 'stock' | 'createdAt'>('name');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
@@ -125,7 +126,13 @@ export default function ProductsPage() {
     navigate(`/products/${product.id}`);
   };
 
-  // Get unique categories for filter
+  // Get unique brands and categories for filters
+  const brands = useMemo(() => {
+    const currentProducts = products || [];
+    const brandSet = new Set(currentProducts.map(p => p.brand).filter((b): b is string => Boolean(b)));
+    return Array.from(brandSet).sort();
+  }, [products]);
+
   const categories = useMemo(() => {
     const currentProducts = products || [];
     const categorySet = new Set(currentProducts.map(p => p.category).filter((cat): cat is string => Boolean(cat)));
@@ -141,10 +148,11 @@ export default function ProductsPage() {
         product.sku?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         product.category?.toLowerCase().includes(searchTerm.toLowerCase());
       
+      const matchesBrand = !selectedBrand || product.brand === selectedBrand;
       const matchesCategory = !selectedCategory || product.category === selectedCategory;
       const matchesActive = showInactive || product.isActive !== false;
-      
-      return matchesSearch && matchesCategory && matchesActive;
+
+      return matchesSearch && matchesBrand && matchesCategory && matchesActive;
     });
 
     // Sort products
@@ -170,12 +178,13 @@ export default function ProductsPage() {
     });
 
     return filtered;
-  }, [products, searchTerm, selectedCategory, sortBy, sortOrder, showInactive]);
+  }, [products, searchTerm, selectedBrand, selectedCategory, sortBy, sortOrder, showInactive]);
 
   // Table configuration
   const tableColumns = [
     { key: 'name', label: 'Name', sortable: true },
     { key: 'sku', label: 'SKU', sortable: false },
+    { key: 'brand', label: 'Brand', sortable: true },
     { key: 'price', label: 'Price', sortable: true },
     { key: 'stock', label: 'Stock', sortable: true },
     { key: 'category', label: 'Category', sortable: true },
@@ -215,6 +224,7 @@ export default function ProductsPage() {
       </div>
     ),
     sku: product.sku || '-',
+    brand: product.brand || '-',
     price: formatCurrency(product.price),
     stock: (
       <div className="flex items-center gap-2">
@@ -344,7 +354,7 @@ export default function ProductsPage() {
             </div>
           </div>
           
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
             <div className="lg:col-span-2">
               <div className="relative">
                 <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4" style={{ color: 'var(--muted-foreground)' }} />
@@ -355,6 +365,17 @@ export default function ProductsPage() {
                   className="pl-10"
                 />
               </div>
+            </div>
+            <div>
+              <Select
+                value={selectedBrand}
+                onChange={(e) => setSelectedBrand(e.target.value)}
+                options={[
+                  { value: '', label: 'All Brands' },
+                  ...brands.map(brand => ({ value: brand, label: brand }))
+                ]}
+                placeholder="All Brands"
+              />
             </div>
             <div>
               <Select
@@ -430,6 +451,11 @@ export default function ProductsPage() {
               {searchTerm && (
                 <span className="px-2 py-1 rounded-full text-xs font-medium" style={{ backgroundColor: 'var(--accent)10', color: 'var(--accent)' }}>
                   &quot;{searchTerm}&quot;
+                </span>
+              )}
+              {selectedBrand && (
+                <span className="px-2 py-1 rounded-full text-xs font-medium" style={{ backgroundColor: 'var(--muted)', color: 'var(--muted-foreground)' }}>
+                  {selectedBrand}
                 </span>
               )}
               {selectedCategory && (
